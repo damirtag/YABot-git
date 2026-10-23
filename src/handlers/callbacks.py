@@ -339,7 +339,7 @@ async def download_soundcl_track(callback_query: types.CallbackQuery, bot: Bot):
         return await bot.send_message(callback_query.from_user.id, "🚫 Track not found.")
     msg = callback_query.message  # get Message
     try:
-        results = db.get_cached_media(url=track.track_id)
+        results = db.get_cached_media(url=track.link)
 
         if results:
             from_chat_id, from_message_id = results

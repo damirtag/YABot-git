@@ -2,12 +2,11 @@ import asyncio
 import os
 from dataclasses import dataclass
 
-import aiohttp
 import requests
 import yt_dlp
 from mutagen.easyid3 import EasyID3
+from mutagen.id3 import APIC, ID3
 from mutagen.mp3 import MP3
-from mutagen.id3 import ID3, APIC
 
 PATTERN = r"(https://soundcloud\.com/[^/]+)"
 
@@ -21,7 +20,7 @@ class Track:
     caption: str = None
     link: str = None
     download_link: str = None
-    cover: str = None 
+    cover: str = None
 
 
 class SoundCloudTool:
@@ -142,63 +141,34 @@ class SoundCloudTool:
         Download a track directly using yt-dlp (recommended method).
         Returns the path to the downloaded file.
         """
-        os.makedirs(output_folder, exist_ok=True)
-
-        # Get track info first
         track = await self.get_track(track_url)
         if not track:
             raise Exception("Could not fetch track info")
-
-        output_template = os.path.join(output_folder, f"track_{track.track_id}.%(ext)s")
-
-        ydl_opts = {
-            **self.YTDL_OPTS,
-            "outtmpl": output_template,
-        }
-
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, lambda: yt_dlp.YoutubeDL(ydl_opts).download([track_url]))
-
-        # Find the downloaded file
-        output_file = os.path.join(output_folder, f"track_{track.track_id}.mp3")
-
-        if os.path.exists(output_file):
-            self._insert_metadata(output_file, track.title, track.artists)
-            return output_file
-        else:
-            raise Exception("Download completed but file not found")
+        return await self.save_track(track, output_folder)
 
     async def save_track(self, track: Track, output_folder: str = "audio") -> str:
         """
-        Save a track from its download link (legacy method).
-        Use download_track() for better reliability.
+        Download a track via yt-dlp + ffmpeg into an mp3.
+        SoundCloud serves HLS only, so the raw download_link is an m3u8 playlist, not audio.
         """
-        if not track.download_link:
-            raise Exception("No download link available for this track")
-
         os.makedirs(output_folder, exist_ok=True)
         output_file = os.path.join(output_folder, f"track_{track.track_id}.mp3")
+        ydl_opts = {
+            **self.YTDL_OPTS,
+            "outtmpl": os.path.join(output_folder, f"track_{track.track_id}.%(ext)s"),
+        }
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(track.download_link) as response:
-                if response.status == 200:
-                    with open(output_file, "wb") as f:
-                        f.write(await response.read())
-                else:
-                    raise Exception(f"Download failed with status {response.status}")
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, lambda: yt_dlp.YoutubeDL(ydl_opts).download([track.link]))
 
-        self._insert_metadata(
-            output_file, track.title, track.artists, track.cover
-        )
+        if not os.path.exists(output_file):
+            raise Exception("Download completed but file not found")
+
+        self._insert_metadata(output_file, track.title, track.artists, track.cover)
         return output_file
 
     @staticmethod
-    def _insert_metadata(
-        file_path: str,
-        title: str,
-        artist: str,
-        cover: str | None = None
-    ):
+    def _insert_metadata(file_path: str, title: str, artist: str, cover: str | None = None):
         try:
             audio = MP3(file_path, ID3=EasyID3)
 
@@ -216,10 +186,7 @@ class SoundCloudTool:
                 tags.add(
                     APIC(
                         encoding=3,
-                        mime=response.headers.get(
-                            "Content-Type",
-                            "image/jpeg"
-                        ),
+                        mime=response.headers.get("Content-Type", "image/jpeg"),
                         type=3,
                         desc="Cover",
                         data=response.content,
@@ -274,7 +241,7 @@ class SoundCloudTool:
             ),
             link=webpage_url,
             download_link=self._get_download_link(data),  # type: ignore
-            cover=data.get("thumbnail", None) # type: ignore
+            cover=data.get("thumbnail", None),  # type: ignore
         )
 
 

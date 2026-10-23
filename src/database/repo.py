@@ -168,7 +168,7 @@ class DB_actions:
                 with closing(conn.cursor()) as cursor:
                     cursor.execute(
                         "INSERT INTO video_cache (chat_id, message_id, video_link) VALUES (%s, %s, %s)",
-                        (CACHE_CHAT, cached_msg_id, url),
+                        (CACHE_CHAT, cached_msg_id, str(url)),
                     )
                     conn.commit()
                     self.logger.info(f"{ConsoleColors.OKGREEN}{url} cached{ConsoleColors.ENDC}")
@@ -183,7 +183,8 @@ class DB_actions:
             with closing(self._get_connection()) as conn:
                 with closing(conn.cursor()) as cursor:
                     cursor.execute(
-                        "SELECT chat_id, message_id FROM video_cache WHERE video_link = %s", (url,)
+                        "SELECT chat_id, message_id FROM video_cache WHERE video_link = %s",
+                        (str(url),),
                     )
                     result = cursor.fetchone()
                     if result:

@@ -13,17 +13,16 @@ import asyncio
 import logging
 import os
 import re
-import requests
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
-import mutagen.id3
-from mutagen.easyid3 import EasyID3
-from mutagen.mp3 import MP3
-from mutagen.id3 import APIC, ID3, ID3NoHeaderError
 
 import aiofiles
+import requests
 from aiohttp import ClientSession
+from mutagen.easyid3 import EasyID3
+from mutagen.id3 import APIC, ID3, USLT, ID3NoHeaderError
+from mutagen.mp3 import MP3
 from yandex_music import (
     Album,
     Chart,
@@ -260,6 +259,23 @@ class YandexMusicSDK:
                         )
                     )
                     tags.save()
+
+                if metadata.lyrics_text:
+                    try:
+                        tags = ID3(filename)
+                    except ID3NoHeaderError:
+                        tags = ID3()
+                    tags.delall("USLT")  # rm existing lyrics if any
+                    tags.add(
+                        USLT(
+                            encoding=3,
+                            lang="eng",
+                            desc="Lyrics",
+                            text=metadata.lyrics_text,
+                        )
+                    )
+                    tags.save(filename)
+
                 self.logger.info(f"Updated metadata for: {metadata.title}")
             except Exception as e:
                 self.logger.error(f"Error updating metadata: {str(e)}")
@@ -324,21 +340,22 @@ class YandexMusicSDK:
             "Starting to download track\n"
             f"settings: codec = {CODEC}, bitrate = {BITRATE}kbps, filename = {filename}"
         )
+        # BITRATE is a ceiling: Yandex may only serve lower bitrates (e.g. 192)
         suitable_links = [
             info
             for info in dwnld_info
-            if info["codec"] == CODEC and info["bitrate_in_kbps"] == BITRATE
+            if info["codec"] == CODEC and info["bitrate_in_kbps"] <= BITRATE
         ]
 
         if not suitable_links:
             self.logger.error("No direct links found")
             return
-        download_url = suitable_links[0]["direct_link"]
+        download_url = max(suitable_links, key=lambda i: i["bitrate_in_kbps"])["direct_link"]
 
         download_path = filename
         if upload_dir:
             download_path = f"{upload_dir}/{filename}"
-            Path(download_path).mkdir(exist_ok=True)
+            Path(upload_dir).mkdir(parents=True, exist_ok=True)
 
         if not os.path.exists(download_path):
             async with ClientSession() as session:

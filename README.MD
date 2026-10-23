@@ -31,7 +31,6 @@ shared with CI:
 just                 # list all recipes
 just run             # start the bot (PYTHONPATH=src uv run python src/app.py)
 just venv            # init .venv
-just venv-activate   # activates .venv
 just fmt             # auto-fix lint issues + format
 just lint            # ruff lint
 just test            # run the test suite

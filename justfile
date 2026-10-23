@@ -18,9 +18,6 @@ venv:
     uv run pip install --upgrade setuptools wheel
     uv run pip install --upgrade -r requirements.txt
 
-venv-activate:
-    uv run source .venv/bin/activate
-
 # lint with ruff
 lint:
     uv run ruff check src tests

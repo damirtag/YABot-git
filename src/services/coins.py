@@ -1,7 +1,37 @@
+import re
 from datetime import datetime, timedelta
 from typing import NamedTuple
 
 from aiohttp import ClientSession
+
+CURRENCY_QUERY = re.compile(
+    r"^(?:(\d+(?:[.,]\d+)?)\s*)?([a-z]{2,6})(?:\s+(?:to\s+|in\s+|в\s+)?([a-z]{2,6}))?$",
+    re.IGNORECASE,
+)
+
+
+def parse_currency_query(text: str, fiat_codes, crypto_symbols) -> tuple[float, str, str] | None:
+    """
+    Accepts "100 USD KZT", "100 usd to kzt", "usd kzt", "1 SOL" (target defaults to USD).
+    Target must be a known fiat code, source a known fiat code or crypto symbol.
+    Without an explicit target a crypto symbol must be uppercase: coin symbols
+    cover plenty of everyday words ("5 min", "2 pm").
+    """
+    match = CURRENCY_QUERY.match(text.strip())
+    if not match:
+        return None
+    amount, src, dst = match.groups()
+    if amount is None and dst is None:
+        return None
+
+    target = (dst or "usd").upper()
+    if target not in fiat_codes:
+        return None
+    if src.upper() not in fiat_codes:
+        if src.lower() not in crypto_symbols or (dst is None and not src.isupper()):
+            return None
+
+    return float(amount.replace(",", ".")) if amount else 1.0, src.lower(), target.lower()
 
 
 def get_change_emoji(change: float) -> str:
@@ -23,6 +53,10 @@ class PriceChange(NamedTuple):
     change_7d: float
 
 
+# symbols users type that CoinGecko lists under a different ticker
+SYMBOL_ALIASES = {"ton": "the-open-network"}  # Toncoin is "gram" on CoinGecko
+
+
 class CryptoAPI:
     def __init__(self):
         self.base_url = "https://api.coingecko.com/api/v3"
@@ -41,18 +75,35 @@ class CryptoAPI:
             self.session = None
 
     async def update_coin_list(self):
-        """Update internal coin list mapping"""
+        """
+        Update internal coin list mapping.
+        Symbols collide (dozens of coins are "ton"), so the top coins by market cap
+        claim their symbols first; the full list only fills in the rest.
+        """
         if not self.session:
             await self.init_session()
+        coin_list: dict[str, str] = dict(SYMBOL_ALIASES)
         try:
+            params = {"vs_currency": "usd", "order": "market_cap_desc", "per_page": 250}
+            async with self.session.get(
+                f"{self.base_url}/coins/markets", params=params
+            ) as response:  # type: ignore
+                if response.status == 200:
+                    for coin in await response.json():
+                        coin_list.setdefault(coin["symbol"].lower(), coin["id"])
+                else:
+                    print(f"Failed to get top coins: {response.status}")
+
             async with self.session.get(f"{self.base_url}/coins/list") as response:  # type: ignore
                 if response.status == 200:
-                    coins = await response.json()
-                    self.coin_list = {coin["symbol"].lower(): coin["id"] for coin in coins}
+                    for coin in await response.json():
+                        coin_list.setdefault(coin["symbol"].lower(), coin["id"])
                 else:
                     print(f"Failed to update coin list: {response.status}")
         except Exception as e:
             print(f"Error updating coin list: {str(e)}")
+        if len(coin_list) > len(SYMBOL_ALIASES):
+            self.coin_list = coin_list
 
     async def get_crypto_price_with_changes(self, crypto: str, fiat: str) -> PriceChange | None:
         """Get crypto price and changes in specified fiat currency"""
@@ -154,6 +205,10 @@ class FiatAPI:
         return current_rate
 
 
+crypto_api = CryptoAPI()
+fiat_api = FiatAPI()
+
+
 async def init_coins_apis():
-    await CryptoAPI().init_session()
-    await FiatAPI().init_session()
+    await crypto_api.init_session()
+    await fiat_api.init_session()

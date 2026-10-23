@@ -17,30 +17,37 @@ UPDATE_NOTIFY = (
     "<code>@yerzhanakh_bot https://www.instagram.com/reel/DZMvmT9s1w5/</code>\n\n"
     "enjoy downloading your brainrot content using my supa pupa bot"
 )
-HELP = """<b>Supporting services:</b>
-<i>🔴 YouTube Video/Shorts
-🔵 Instagram Reels/Posts
-🔵 VK Clips
-🟣 Twitch Clips
-⚫️ TikTok Videos/Pics
-🟠 SoundCloud Search/Track
-🟡 Yandex.Music Search/Track (New)</i>
-
-<b>Inline:</b>
-<code>@yerzhanakh_bot</code> - get your saved tracks
-<code>@yerzhanakh_bot ask ...</code> - ask something to AI
+HELP = """<b>Just send a link — I'll download it:</b>
+<i>🔴 YouTube videos / Shorts
+🔵 Instagram Reels / Posts
+⚫️ TikTok videos / photos
+🔵 VK Clips · 🟣 Twitch Clips
+🟠 SoundCloud tracks
+🟡 Yandex Music tracks</i>
 
 <b>Commands:</b>
-<code>/ym [query]</code> — search tracks from YandexMusic
-<code>/sc [query]</code> — search tracks from SoundCloud
-<code>/roll</code> — roll number between 1 and 100 (like in dota)
-<code>/ask your_message</code> — ask something to AI, 
-    - or reply with this command to someones message
+<code>/ym query</code> — search Yandex Music
+<code>/sc query</code> — search SoundCloud
+<code>/ask question</code> — ask AI (or reply to a message with /ask)
+<code>/w city</code> or <code>.ц city</code> — weather + 5-day forecast
+<code>/q</code> · <code>/qq</code> — reply to a message to make a quote sticker
+<code>/roll</code> — random number 1–100
+<code>/joke</code> — reply to a joke to start a 1–10 rating (groups)
+<code>/jokestats</code> — joke stats and weekly leaderboard (groups)
+<code>/saved</code> — your saved files (private chat)
+<code>/settings</code> — turn features on/off for this chat (admins in groups)
+<code>/info</code> — bot stats
+<code>/help</code> — this message
 
-<b>Features:</b>
-🎤 <i>Voice recognizer</i> (works in groups), recognizes voice and sends text of recognized audio.
-🪙 <i>Coins Converter</i> converts crypto and fiat currencies instantly! 
-Example usage: <code>1 SOL</code> | <code>50 TON RUB</code> | <code>50 USD KZT</code>
+<b>Inline:</b>
+<code>@yerzhanakh_bot</code> — your saved files
+<code>@yerzhanakh_bot ask ...</code> — ask AI
+<code>@yerzhanakh_bot link</code> — send a TikTok/Instagram video inline
+
+<b>Automatic:</b>
+🎤 Voice and video messages are transcribed to text
+🪙 Currency converter for fiat and crypto:
+<code>100 USD KZT</code> · <code>50 eur to rub</code> · <code>1 SOL</code> · <code>usd kzt</code>
 """
 INFO = (
     "📊 Hey there! Here are the current stats:\n\n"

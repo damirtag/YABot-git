@@ -6,18 +6,16 @@ from aiogram import Bot, F, Router, types
 from config import logger
 from database.repo import DB_actions
 from services.convert import Converter
-from utils.decorators import log
 
 router = Router()
 db = DB_actions()
 
 
-@router.message(F.content_type.in_({"voice", "video_note"}))
-@log("SPEECH_REC")
+@router.message(
+    F.content_type.in_({"voice", "video_note"}),
+    flags={"log": "SPEECH_REC", "feature": "voice_disabled"},
+)
 async def get_audio_messages(message: types.Message, bot: Bot):
-    if db.get_setting(message.chat.id, "voice_disabled"):
-        return
-
     file_name = None
     converter = None
 

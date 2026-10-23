@@ -26,7 +26,6 @@ from services.tiktok import TikTok
 from services.yandexmusic import TrackData, YandexMusicSDK
 from services.youtube import YouTubeSDK
 from utils import YANDEX_MUSIC_TRACK_CAPTION, ConsoleColors, RegexFilter, Tools
-from utils.decorators import log
 
 logger = logging.getLogger()
 router = Router()
@@ -71,8 +70,7 @@ def _cleanup_tiktok_files(tt, post_data, sound):
         logger.warning(f"TikTok cleanup failed: {e}")
 
 
-@router.message(RegexFilter(Patterns.TIKTOK.value))
-@log("TIKTOK_LINKS")
+@router.message(RegexFilter(Patterns.TIKTOK.value), flags={"log": "TIKTOK_LINKS"})
 async def tiktok_downloader(message: types.Message, bot: Bot):
     if message.chat.id in IGNORE_CHAT_IDS:
         return False
@@ -191,8 +189,7 @@ async def tiktok_downloader(message: types.Message, bot: Bot):
             logger.exception(f"ERROR DOWNLOADING TIKTOK: {e}")
 
 
-@router.message(RegexFilter(Patterns.INST_REELS.value))
-@log("REELS_LINKS")
+@router.message(RegexFilter(Patterns.INST_REELS.value), flags={"log": "REELS_LINKS"})
 async def inst_reels_handler(message: types.Message, bot: Bot):
     event_chat = message.chat
 
@@ -286,8 +283,7 @@ async def inst_reels_handler(message: types.Message, bot: Bot):
             pass
 
 
-@router.message(RegexFilter(Patterns.INST_POSTS.value))
-@log("INST_POST")
+@router.message(RegexFilter(Patterns.INST_POSTS.value), flags={"log": "INST_POST"})
 async def inst_photos_handler(message: types.Message, bot: Bot):
     event_chat = message.chat
     if event_chat.id in IGNORE_CHAT_IDS:
@@ -360,8 +356,7 @@ async def inst_photos_handler(message: types.Message, bot: Bot):
             logger.info(f"[Instagram:post] | Cleaned up {download_dir}")
 
 
-@router.message(RegexFilter(Patterns.TWITCH_VK.value))
-@log("TWITCH_VK_LINKS")
+@router.message(RegexFilter(Patterns.TWITCH_VK.value), flags={"log": "TWITCH_VK_LINKS"})
 async def twitch_vk_handler(message: types.Message, bot: Bot):
     event_chat = message.chat
     message_id = message.message_id
@@ -450,8 +445,7 @@ async def twitch_vk_handler(message: types.Message, bot: Bot):
                 logger.info("%s has been removed successfuly", title)
 
 
-@router.message(RegexFilter(Patterns.YOUTUBE.value))
-@log("YOUTUBE_VIDEO")
+@router.message(RegexFilter(Patterns.YOUTUBE.value), flags={"log": "YOUTUBE_VIDEO"})
 async def handle_youtube_video(m: types.Message, bot: Bot):
     if m.chat.id in IGNORE_CHAT_IDS:
         return False
@@ -523,8 +517,7 @@ async def handle_youtube_video(m: types.Message, bot: Bot):
 # -- music platforms link handlers --
 
 
-@router.message(RegexFilter(Patterns.YANDEX_MUSIC.value))
-@log("YM_TRACK_LINKS")
+@router.message(RegexFilter(Patterns.YANDEX_MUSIC.value), flags={"log": "YM_TRACK_LINKS"})
 async def yandex_music_link_handler(m: types.Message):
     match = re.search(Patterns.YANDEX_MUSIC.value, m.text)
     if match:
@@ -557,8 +550,7 @@ async def yandex_music_link_handler(m: types.Message):
         )
 
 
-@router.message(RegexFilter(Patterns.SOUNDCLOUD.value))
-@log("SC_TRACK_LINKS")
+@router.message(RegexFilter(Patterns.SOUNDCLOUD.value), flags={"log": "SC_TRACK_LINKS"})
 async def soundload(message: types.Message, bot: Bot):
     chat_id = message.chat.id
     message_id = message.message_id

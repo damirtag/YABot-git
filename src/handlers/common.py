@@ -1,51 +1,55 @@
 from aiogram import Router, types
 
-from database.repo import DB_actions
-from services.coins import CryptoAPI, FiatAPI, get_change_emoji
-from utils import RegexFilter, Tools
-from utils.decorators import log
+from config import logger
+from services.coins import (
+    CURRENCY_QUERY,
+    crypto_api,
+    fiat_api,
+    get_change_emoji,
+    parse_currency_query,
+)
 
 router = Router()
-tools = Tools()
-crypto_api = CryptoAPI()
-fiat_api = FiatAPI()
-db = DB_actions()
 
 
-@router.message(RegexFilter(r"^(\d+(?:\.\d+)?\s+)?[a-zA-Z]+(\s+[a-zA-Z]+)?$"))
-@log("COINS_CONVERTER")
-async def convert_currency(message: types.Message):
+async def currency_query(message: types.Message) -> dict | bool:
+    """Filter: matches only real conversion queries, injects `query` into the handler."""
+    if not message.text or not CURRENCY_QUERY.match(message.text.strip()):
+        return False
+    if not fiat_api.rates:
+        await fiat_api.update_rates()
+    if not crypto_api.coin_list:
+        await crypto_api.update_coin_list()
+
+    parsed = parse_currency_query(message.text, fiat_api.rates, crypto_api.coin_list)
+    return {"query": parsed} if parsed else False
+
+
+@router.message(
+    currency_query, flags={"log": "COINS_CONVERTER", "feature": "coins_converter_disabled"}
+)
+async def convert_currency(message: types.Message, query: tuple[float, str, str]):
     """Currency conversion handler"""
-    if db.get_setting(message.chat.id, "coins_converter_disabled"):
-        return
+    amount, from_currency, to_currency = query
     try:
-        # Parse the message
-        parsed = tools.parse_currency_query(message.text)
-        if not parsed:
-            return
-
-        amount, from_currency, to_currency = parsed
-
         # Try crypto conversion first
         crypto_price = await crypto_api.get_crypto_price_with_changes(from_currency, to_currency)
-        if crypto_price:
+        if crypto_price and crypto_price.current_price:
             total = amount * crypto_price.current_price
             response = [
-                f"<code>{amount} {from_currency.upper()} = {total:.2f} {to_currency.upper()}</code>",
+                f"<code>{amount:g} {from_currency.upper()} = {total:.2f} {to_currency.upper()}</code>",
                 f"\n<b> - 24h Change:</b> {get_change_emoji(crypto_price.change_24h)} <code>{crypto_price.change_24h:.2f}%</code>",
                 f"\n<b> - 7d Change:</b> {get_change_emoji(crypto_price.change_7d)} <code>{crypto_price.change_7d:.2f}%</code>",
             ]
-            await message.reply("".join(response))
-            return
+            return await message.reply("".join(response))
 
         current_rate = await fiat_api.get_fiat_rate_with_change(from_currency, to_currency)
         if current_rate:
             total = amount * current_rate
-            response = [
-                f"<code>{amount:g} {from_currency.upper()} = {total:.2f} {to_currency.upper()}</code>",
-            ]
-            await message.reply("".join(response))
-            return
+            return await message.reply(
+                f"<code>{amount:g} {from_currency.upper()} = {total:.2f} {to_currency.upper()}</code>"
+            )
 
     except Exception as e:
-        print(f"Error in conversion handler: {str(e)}")
+        logger.error(f"Error in conversion handler: {e}")
+    return False  # nothing sent: don't count it as a conversion

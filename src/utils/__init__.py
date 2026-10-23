@@ -49,38 +49,6 @@ class Tools:
             print(e)
             return None
 
-    @staticmethod
-    def parse_currency_query(text: str) -> tuple[float, str, str] | None:
-        """Parse message text into amount, from_currency, and to_currency"""
-        text = " ".join(text.lower().split())
-
-        # Different regex patterns for matching
-        patterns = [
-            # Pattern for "100 USD RUB" format
-            r"^(\d+(?:\.\d+)?)\s+([a-zA-Z]+)\s+([a-zA-Z]+)$",
-            # Pattern for "USD RUB" format (assuming amount=1)
-            r"^([a-zA-Z]+)\s+([a-zA-Z]+)$",
-            # Pattern for "100 USD" format (assuming to_currency=USD)
-            r"^(\d+(?:\.\d+)?)\s+([a-zA-Z]+)$",
-        ]
-
-        for pattern in patterns:
-            match = re.match(pattern, text)
-            if match:
-                groups = match.groups()
-                if len(groups) == 3:
-                    # Full pattern with amount and both currencies
-                    return float(groups[0]), groups[1], groups[2]
-                elif len(groups) == 2:
-                    if groups[0].isalpha():
-                        # Currency pair without amount
-                        return 1.0, groups[0], groups[1]
-                    else:
-                        # Amount and currency without target currency
-                        return float(groups[0]), groups[1], "usd"
-
-        return None
-
     def check_query(self, query, max_words=20):
         words = query.split()
         return len(words) <= max_words

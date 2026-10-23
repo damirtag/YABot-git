@@ -10,7 +10,6 @@ from config.enums import Patterns
 from database.repo import DB_actions
 from services.downloader import resolve_inline_media
 from services.openai import generate_response
-from utils.decorators import log
 
 router = Router()
 db = DB_actions()
@@ -55,8 +54,9 @@ async def chatgpt_inline_handler(inline_query: types.InlineQuery, bot: Bot):
         logger.error(f"Error in inline handler: {e}")
 
 
-@router.chosen_inline_result(lambda chosen: chosen.query.lower().startswith("ask "))
-@log("CHATGPT")
+@router.chosen_inline_result(
+    lambda chosen: chosen.query.lower().startswith("ask "), flags={"log": "CHATGPT"}
+)
 async def chatgpt_chosen_inline_handler(chosen_inline_query: types.ChosenInlineResult, bot: Bot):
     try:
         message_id = chosen_inline_query.inline_message_id
@@ -97,8 +97,7 @@ async def chatgpt_chosen_inline_handler(chosen_inline_query: types.ChosenInlineR
         logger.error(f"Error in chosen inline handler: {e}")
 
 
-@router.inline_query(lambda q: _is_downloadable_link(q.query))
-@log("INLINE_DOWNLOAD")
+@router.inline_query(lambda q: _is_downloadable_link(q.query), flags={"log": "INLINE_DOWNLOAD"})
 async def inline_download_query(inline_query: types.InlineQuery, bot: Bot):
     """Resolve a TikTok/Instagram link to direct CDN URLs and answer inline.
 

@@ -3,7 +3,7 @@ import time
 from random import randrange
 
 from aiogram import Bot, Router, types
-from aiogram.filters import Command, CommandObject, CommandStart
+from aiogram.filters import Command, CommandObject, CommandStart, or_f
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -32,7 +32,6 @@ from services.weather import (
     fetch_weather_data,
 )
 from utils import RegexFilter, Tools
-from utils.decorators import log
 from utils.helpers import build_saved_files_keyboard
 
 router = Router()
@@ -43,8 +42,7 @@ tools = Tools()
 # -- Base commands --
 
 
-@router.message(CommandStart())
-@log("start")
+@router.message(or_f(CommandStart(), Command("help")), flags={"log": "start"})
 async def hello(message: types.Message):
     start_text = f"""
 <b>Welcome! I will help you to download content from the list of services below:</b>
@@ -55,20 +53,18 @@ async def hello(message: types.Message):
     await message.reply(text=start_text, reply_markup=CLOSE_BUTTON)
 
 
-@router.message(Command(commands=["roll", "ролл"], prefix="!/."))
-@log("roll")
+@router.message(
+    Command(commands=["roll", "ролл"], prefix="!/."),
+    flags={"log": "roll", "feature": "roll_disabled"},
+)
 async def rate(message: types.Message):
-    if db.get_setting(message.chat.id, "roll_disabled"):
-        return
-
     nick = f"<a href='tg://user?id={message.from_user.id}'>{message.from_user.full_name}</a>"
     random = randrange(101)
     roll = f"🎱 <b>{nick}</b> роллит! [1-100]. Выпадает: <b>{random}</b>!"
     await message.answer(text=roll, reply_to_message_id=message.message_id)
 
 
-@router.message(Command(commands=["info", "инфо"], prefix="!/."))
-@log("INFO")
+@router.message(Command(commands=["info", "инфо"], prefix="!/."), flags={"log": "INFO"})
 async def info_handler(message: types.Message):
     try:
         results = db.execute_query("SELECT video_link FROM video_cache")
@@ -140,12 +136,8 @@ async def info_handler(message: types.Message):
         await message.reply("Failed to handle this request, try again later")
 
 
-@router.message(Command("ask"))
-@log("ASK")
+@router.message(Command("ask"), flags={"log": "ASK", "feature": "gpt_disabled"})
 async def ask_handler(m: types.Message, command: CommandObject):
-    if db.get_setting(m.chat.id, "gpt_disabled"):
-        return
-
     query: str = command.args
     user = m.from_user
 
@@ -187,8 +179,7 @@ async def ask_handler(m: types.Message, command: CommandObject):
         )
 
 
-@router.message(Command("saved"))
-@log("SAVED")
+@router.message(Command("saved"), flags={"log": "SAVED"})
 async def show_saved_files_handler(m: types.Message):
     user_id = m.from_user.id
 
@@ -225,8 +216,7 @@ from services.yandexmusic import TrackData, YandexMusicSDK  # noqa: E402
 sc = SoundCloudTool()
 
 
-@router.message(Command("ym"))
-@log("YM_TRACK_SEARCH")
+@router.message(Command("ym"), flags={"log": "YM_TRACK_SEARCH"})
 async def ym_command_handler(message: types.Message, command: CommandObject):
     args: str = command.args
     if not args:
@@ -257,8 +247,7 @@ async def ym_command_handler(message: types.Message, command: CommandObject):
         )
 
 
-@router.message(Command("sc"))
-@log("SC_TRACK_SEARCH")
+@router.message(Command("sc"), flags={"log": "SC_TRACK_SEARCH"})
 async def soundsearch(message: types.Message, command: CommandObject):
     chat_id = message.chat.id
     if chat_id in IGNORE_CHAT_IDS:
@@ -309,12 +298,10 @@ async def soundsearch(message: types.Message, command: CommandObject):
 quote_pattern = r"^[/\.](q|й)$"
 
 
-@router.message(RegexFilter(quote_pattern))
-@log("QUOTE_MAKER")
+@router.message(
+    RegexFilter(quote_pattern), flags={"log": "QUOTE_MAKER", "feature": "quote_disabled"}
+)
 async def makequote_handler(message: types.Message, bot: Bot):
-    if db.get_setting(message.chat.id, "quote_disabled"):
-        return
-
     quotemaker = QuoteMaker(bot)
     await quotemaker.send_quote(message)
 
@@ -323,12 +310,10 @@ async def makequote_handler(message: types.Message, bot: Bot):
 quote_tg_pattern = r"^[/\.](qq|йй)$"
 
 
-@router.message(RegexFilter(quote_tg_pattern))
-@log("QUOTE_MAKER_TG")
+@router.message(
+    RegexFilter(quote_tg_pattern), flags={"log": "QUOTE_MAKER_TG", "feature": "quote_disabled"}
+)
 async def makequote_tg_handler(message: types.Message, bot: Bot):
-    if db.get_setting(message.chat.id, "quote_disabled"):
-        return
-
     quotemaker = TelegramQuoteMaker(bot)
     await quotemaker.send_quote(message)
 
@@ -397,11 +382,10 @@ WEATHER_PATTERN = re.compile(r"^(?:/w|\.ц)\s+([\w\s,]+)$", re.IGNORECASE)
 telegraph_client = TelegraphClient(access_token=TELEGRAPH_ACCESS_TOKEN)
 
 
-@router.message(RegexFilter(WEATHER_PATTERN))
+@router.message(
+    RegexFilter(WEATHER_PATTERN), flags={"log": "WEATHER", "feature": "weather_disabled"}
+)
 async def cmd_weather(message: types.Message):
-    if db.get_setting(message.chat.id, "weather_disabled"):
-        return
-
     city_name = WEATHER_PATTERN.match(message.text).group(1)  # type: ignore
     city_name = CITY_ALIASES.get(
         city_name.lower(), city_name

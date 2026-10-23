@@ -5,7 +5,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from config import logger
 from database.repo import DB_actions
 from services.jokes import format_leaderboard, format_user_stats, mention
-from utils.decorators import log
 
 router = Router()
 db = DB_actions()
@@ -31,14 +30,10 @@ def _poll_text(author_id: int, author_name: str | None, count: int, avg: float) 
     )
 
 
-@router.message(Command("joke"))
-@log("JOKE")
+@router.message(Command("joke"), flags={"log": "JOKE", "feature": "joke_disabled"})
 async def cmd_joke(message: types.Message, bot: Bot):
     if message.chat.type not in GROUP_TYPES:
         return await message.reply("🃏 The joke game works in group chats only.")
-    if db.get_setting(message.chat.id, "joke_disabled"):
-        return
-
     target = message.reply_to_message
     if not target:
         return await message.reply("Reply to a message with /joke to start a rating poll.")
@@ -95,14 +90,10 @@ async def cb_vote(call: types.CallbackQuery):
     await call.answer(f"You rated {score}/10 👍")
 
 
-@router.message(Command("jokestats"))
-@log("JOKE_STATS")
+@router.message(Command("jokestats"), flags={"log": "JOKE_STATS", "feature": "joke_disabled"})
 async def cmd_jokestats(message: types.Message):
     if message.chat.type not in GROUP_TYPES:
         return await message.reply("🃏 Joke stats work in group chats only.")
-    if db.get_setting(message.chat.id, "joke_disabled"):
-        return
-
     target_user = (
         message.reply_to_message.from_user
         if message.reply_to_message and message.reply_to_message.from_user

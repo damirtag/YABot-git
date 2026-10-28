@@ -40,6 +40,11 @@ async def close(call: types.CallbackQuery, bot: Bot):
     await bot.delete_message(call.message.chat.id, call.message.message_id)
 
 
+@router.callback_query(F.data == "noop")
+async def noop(call: types.CallbackQuery):
+    await call.answer()
+
+
 @router.callback_query(F.data.in_(["waiting", "confirmed"]))
 async def waiting(call: types.CallbackQuery):
     await call.answer(random.choice(COOL_PHRASES).lower()[:200], True)

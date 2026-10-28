@@ -489,6 +489,7 @@ class DB_actions:
         stats["recent_users"] = self.execute_query("""
             SELECT * FROM (
                 SELECT DISTINCT ON (u.user_id)
+                    u.user_id,
                     u.username, 
                     u.first_name, 
                     u.last_name, 
@@ -504,7 +505,7 @@ class DB_actions:
 
         # Most active users
         stats["active_users"] = self.execute_query("""
-            SELECT users.username, users.first_name, users.last_name, COUNT(commands.id) as cmd_count 
+            SELECT users.user_id, users.username, users.first_name, users.last_name, COUNT(commands.id) as cmd_count 
             FROM users 
             JOIN commands ON users.user_id = commands.user_id 
             GROUP BY users.user_id, users.username, users.first_name, users.last_name
@@ -517,7 +518,7 @@ class DB_actions:
 
         # Top file savers
         stats["top_savers"] = self.execute_query("""
-            SELECT users.username, users.first_name, users.last_name, COUNT(user_saved.file_id) as file_count
+            SELECT users.user_id, users.username, users.first_name, users.last_name, COUNT(user_saved.file_id) as file_count
             FROM users 
             JOIN user_saved ON users.user_id = user_saved.user_id
             GROUP BY users.user_id, users.username, users.first_name, users.last_name

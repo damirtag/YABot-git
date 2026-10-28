@@ -1,3 +1,7 @@
+from datetime import datetime
+from html import escape
+
+import pytz
 from aiogram import types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -6,112 +10,183 @@ from database.repo import DB_actions
 
 db = DB_actions()
 
+ADMIN_TZ = pytz.timezone("Etc/GMT-5")
+CARD_MAX_GROUPS = 20
+ADMIN_FILES_PER_PAGE = 8
+FILE_ICONS = {"audio": "🎵", "video": "🎬", "voice": "🎙"}
+
+# Admin navigation: a user card remembers where it was opened from via `back`:
+#   "<page>" -> users list page, "s" -> last search results, "h" -> dashboard.
+
+
+def fmt_ts(dt: datetime | None, fmt: str = "%Y-%m-%d %H:%M") -> str:
+    """DB timestamps are naive UTC; show them in admin time."""
+    return dt.replace(tzinfo=pytz.utc).astimezone(ADMIN_TZ).strftime(fmt) if dt else "—"
+
+
+def display_name(user_id: int, username: str | None, first: str | None, last: str | None) -> str:
+    """HTML-safe @username, else full name, else `User <id>`."""
+    if username:
+        return "@" + escape(username)
+    return escape(f"{first or ''} {last or ''}".strip()) or f"User {user_id}"
+
+
+def user_link(user_id, username, first, last) -> str:
+    """Name followed by a tappable /u<id> that opens the user card."""
+    return f"{display_name(user_id, username, first, last)} /u{user_id}"
+
+
+def user_row_line(u: dict) -> str:
+    """Two-line list entry: tappable name, then activity counts and join date."""
+    name = user_link(u["user_id"], u["username"], u["first_name"], u["last_name"])
+    joined = fmt_ts(u["joined_at"], "%Y-%m-%d")
+    return f"• {name}\n   ⚡ {u['command_count']} · 📂 {u['saved_files']} · 📅 {joined}"
+
+
+def add_user_buttons(builder: InlineKeyboardBuilder, users: list[dict], back: str) -> None:
+    for u in users:
+        name = display_name(u["user_id"], u["username"], u["first_name"], u["last_name"])
+        builder.row(
+            types.InlineKeyboardButton(
+                text=f"👤 {name[:24]}", callback_data=f"user_details:{u['user_id']}:{back}"
+            )
+        )
+
+
+def back_button(back: str) -> types.InlineKeyboardButton:
+    if back == "s":
+        return types.InlineKeyboardButton(
+            text="« Search results", callback_data="back_to_search_results"
+        )
+    if back.isdigit():
+        return types.InlineKeyboardButton(text="« Users", callback_data=f"view_users:{back}")
+    return types.InlineKeyboardButton(text="📊 Dashboard", callback_data="refresh_admin")
+
+
+def page_nav(page: int, pages: int, callback: str) -> list[types.InlineKeyboardButton]:
+    """« n/N » buttons; `callback` is a format string taking the target page."""
+    nav = [types.InlineKeyboardButton(text=f"{page + 1}/{pages}", callback_data="noop")]
+    if page > 0:
+        nav.insert(0, types.InlineKeyboardButton(text="«", callback_data=callback.format(page - 1)))
+    if page < pages - 1:
+        nav.append(types.InlineKeyboardButton(text="»", callback_data=callback.format(page + 1)))
+    return nav
+
+
+def render_user_card(u: dict) -> str:
+    full_name = escape(f"{u['first_name'] or ''} {u['last_name'] or ''}".strip()) or "—"
+    username = "@" + escape(u["username"]) if u["username"] else "no username"
+    lines = [
+        f"👤 <b>{full_name}</b>",
+        f"{username} · <code>{u['user_id']}</code>",
+        "",
+        f"📅 Joined: {fmt_ts(u['joined_at'])}",
+        f"⏱ Last active: {fmt_ts(u['last_active'])}",
+        f"⚡ Commands: <b>{u['command_count']}</b> · 📂 Saved files: <b>{u['saved_files']}</b>",
+    ]
+
+    if u["top_commands"]:
+        top = " · ".join(f"/{escape(cmd)} ×{n}" for cmd, n in u["top_commands"])
+        lines += ["", f"🏆 <b>Top commands:</b> {top}"]
+
+    groups = u["groups"]
+    lines += ["", f"👥 <b>Groups ({len(groups)})</b>"]
+    for g in groups[:CARD_MAX_GROUPS]:
+        title = escape(g["title"]) if g["title"] else "<i>untitled</i>"
+        lines.append(
+            f"• {title} <code>{g['chat_id']}</code> · {fmt_ts(g['last_seen'], '%Y-%m-%d')}"
+        )
+    if len(groups) > CARD_MAX_GROUPS:
+        lines.append(f"… and {len(groups) - CARD_MAX_GROUPS} more")
+    if not groups:
+        lines.append("Not seen in any group yet")
+
+    if u["recent_commands"]:
+        lines += ["", "🕘 <b>Recent:</b>"]
+        lines += [f"/{escape(c['command'])} · {fmt_ts(c['used_at'])}" for c in u["recent_commands"]]
+
+    return "\n".join(lines)
+
+
+def user_card_keyboard(u: dict, back: str) -> types.InlineKeyboardMarkup:
+    uid = u["user_id"]
+    builder = InlineKeyboardBuilder()
+    if u["saved_files"]:
+        builder.button(
+            text=f"📂 Saved files ({u['saved_files']})", callback_data=f"admin_files:{uid}:0:{back}"
+        )
+    builder.button(text="🔄 Refresh", callback_data=f"user_details:{uid}:{back}")
+    builder.add(back_button(back))
+    builder.adjust(*((1, 2) if u["saved_files"] else (2,)))
+    return builder.as_markup()
+
+
+def saved_files_keyboard(user_id: int, files: list[dict], page: int, total: int, back: str):
+    pages = max(1, -(-total // ADMIN_FILES_PER_PAGE))
+    builder = InlineKeyboardBuilder()
+    for f in files:
+        kind = f["type"].split("/")[0]
+        label = f"{FILE_ICONS.get(kind, '📄')} {kind.capitalize()} · {fmt_ts(f['saved_at'], '%d.%m.%Y')}"
+        builder.row(types.InlineKeyboardButton(text=label, callback_data=f"admin_file:{f['id']}"))
+
+    builder.row(*page_nav(page, pages, f"admin_files:{user_id}:{{}}:{back}"))
+    builder.row(
+        types.InlineKeyboardButton(
+            text="« Back to user", callback_data=f"user_details:{user_id}:{back}"
+        )
+    )
+    return builder.as_markup()
+
 
 async def show_users_page(message: types.Message, page=0, is_edit=False):
-    users = db.get_all_users(
-        limit=constants.ADMIN_USERS_PER_PAGE, offset=page * constants.ADMIN_USERS_PER_PAGE
-    )
+    per_page = constants.ADMIN_USERS_PER_PAGE
     total_users = db.get_total_users_count()
-    total_pages = (
-        total_users + constants.ADMIN_USERS_PER_PAGE - 1
-    ) // constants.ADMIN_USERS_PER_PAGE
+    total_pages = max(1, -(-total_users // per_page))
+    page = min(max(page, 0), total_pages - 1)
+    users = db.get_all_users(limit=per_page, offset=page * per_page)
 
-    if page < 0:
-        page = 0
-    elif page >= total_pages:
-        page = total_pages - 1
+    text = f"👥 <b>Users</b> · {total_users} total · page {page + 1}/{total_pages}\n\n"
+    text += "\n".join(user_row_line(u) for u in users)
 
-    text = f"👥 <b>Users List</b> (Page {page + 1} of {total_pages})\n\n"
+    builder = InlineKeyboardBuilder()
+    add_user_buttons(builder, users, back=str(page))
 
-    for user in users:
-        username = (
-            f"@{user['username']}"
-            if user["username"]
-            else f"{user['first_name'] or ''} {user['last_name'] or ''}".strip()
-        )
-        if not username:
-            username = f"User {user['user_id']}"
-        text += f"• {username} - ID: <code>{user['user_id']}</code>\n"
-
-    keyboard = []
-
-    nav_row = []
-    if page > 0:
-        nav_row.append(
-            types.InlineKeyboardButton(text="« Prev", callback_data=f"view_users:{page - 1}")
-        )
-
-    nav_row.append(
-        types.InlineKeyboardButton(text=f"{page + 1}/{total_pages}", callback_data="noop")
+    builder.row(*page_nav(page, total_pages, "view_users:{}"))
+    builder.row(
+        types.InlineKeyboardButton(text="🔍 Search", callback_data="search_user"),
+        back_button("h"),
     )
 
-    if page < total_pages - 1:
-        nav_row.append(
-            types.InlineKeyboardButton(text="Next »", callback_data=f"view_users:{page + 1}")
-        )
-
-    keyboard.append(nav_row)
-
-    for user in users:
-        user_id = user["user_id"]
-        username = (
-            f"@{user['username']}"
-            if user["username"]
-            else f"{user['first_name'] or ''} {user['last_name'] or ''}".strip()
-        )
-        if not username:
-            username = f"User {user_id}"
-
-        keyboard.append(
-            [
-                types.InlineKeyboardButton(
-                    text=f"👤 {username[:20]}", callback_data=f"user_details:{user_id}:{page}"
-                )
-            ]
-        )
-
-    keyboard.append(
-        [types.InlineKeyboardButton(text="🔙 Back to Admin", callback_data="refresh_admin")]
-    )
-
-    markup = types.InlineKeyboardMarkup(inline_keyboard=keyboard)
-
-    if is_edit:
-        await message.edit_text(text, reply_markup=markup)
-    else:
-        await message.reply(text, reply_markup=markup)
+    send = message.edit_text if is_edit else message.reply
+    await send(text, reply_markup=builder.as_markup())
 
 
 def generate_stats_text(stats):
-    stats_text = (
-        f"👥 Users: <code>{stats['user_count']}</code>\n"
-        f"💬 Chats: <code>{stats['chat_count']}</code>\n"
-        f"📂 Saved files: <code>{stats['total_saved_files']}</code>\n\n"
-        f"<b>Top Commands:</b>\n"
-    )
-
-    for command, count in stats["top_commands"]:
-        stats_text += f"/{command}: {count}\n"
-
-    stats_text += "\n👤 <b>10 last active users:</b>\n"
-    for user in stats["recent_users"]:
-        username = f"@{user[0]}" if user[0] else f"{user[1] or ''} {user[2] or ''}".strip()
-        last_used = user[3]
-        stats_text += f" - {username} (<code>/{last_used}</code>: {user[4]})\n"
-
-    stats_text += "\n🔥 <b>10 most active:</b>\n"
-    for user in stats["active_users"]:
-        username = f"@{user[0]}" if user[0] else f"{user[1] or ''} {user[2] or ''}".strip()
-        command_count = user[3]
-        stats_text += f" - {username}: {command_count} command\n"
-
-    stats_text += "\n💾 <b>10 users by saved files:</b>\n"
-    for user in stats["top_savers"]:
-        username = f"@{user[0]}" if user[0] else f"{user[1] or ''} {user[2] or ''}".strip()
-        file_count = user[3]
-        stats_text += f" - {username}: <code>{file_count}</code> files\n"
-
-    return stats_text
+    """Dashboard text. User rows are (user_id, username, first, last, *extra)."""
+    lines = [
+        "📊 <b>Admin dashboard</b>",
+        "",
+        f"👥 Users: <code>{stats['user_count']}</code> · 💬 Chats: <code>{stats['chat_count']}</code>"
+        f" · 📂 Files: <code>{stats['total_saved_files']}</code>",
+        "",
+        "<b>Top commands:</b>",
+        " · ".join(f"/{escape(cmd)} {n}" for cmd, n in stats["top_commands"]),
+        "",
+        "🕘 <b>Recently active:</b>",
+        *(
+            f"• {user_link(*u[:4])} · /{escape(u[4])} {fmt_ts(u[5], '%m-%d %H:%M')}"
+            for u in stats["recent_users"]
+        ),
+        "",
+        "🔥 <b>Most active:</b>",
+        *(f"• {user_link(*u[:4])} · {u[4]} cmds" for u in stats["active_users"]),
+        "",
+        "💾 <b>Top savers:</b>",
+        *(f"• {user_link(*u[:4])} · {u[4]} files" for u in stats["top_savers"]),
+        "",
+        f"<i>Tap /u… to open a user · updated {datetime.now(ADMIN_TZ):%H:%M:%S}</i>",
+    ]
+    return "\n".join(lines)
 
 
 def build_saved_files_keyboard(user_id: int, page: int = 0) -> types.InlineKeyboardMarkup | None:

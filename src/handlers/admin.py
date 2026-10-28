@@ -1,197 +1,135 @@
 import asyncio
+import re
+from html import escape
 
-import pytz
 from aiogram import Bot, F, Router, types
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from config.constants import ADMIN_KEYBOARD, DAMIR_USER_ID
 from database.repo import DB_actions
 from utils.broadcast import BroadcastManager
-from utils.helpers import generate_stats_text, show_users_page
+from utils.helpers import (
+    ADMIN_FILES_PER_PAGE,
+    add_user_buttons,
+    back_button,
+    fmt_ts,
+    generate_stats_text,
+    render_user_card,
+    saved_files_keyboard,
+    show_users_page,
+    user_card_keyboard,
+    user_row_line,
+)
 
 router = Router()
 db = DB_actions()
+
+# Admin panel: everything in here is admin-only, checked once.
+panel = Router()
+panel.message.filter(F.from_user.id == DAMIR_USER_ID)
+panel.callback_query.filter(F.from_user.id == DAMIR_USER_ID)
+router.include_router(panel)
+
+SEARCH_HELP = (
+    "🔍 <b>Search users</b>\n\n"
+    "Send an ID, @username, or first/last name.\n"
+    "Tip: tap any <code>/u…</code> link to open a user directly."
+)
 
 
 class SearchStates(StatesGroup):
     waiting_for_search_term = State()
 
 
-@router.message(Command("admin"))
+async def show_dashboard(message: types.Message, is_edit: bool = False):
+    send = message.edit_text if is_edit else message.reply
+    await send(generate_stats_text(db.get_stats()), reply_markup=ADMIN_KEYBOARD)
+
+
+async def show_user_card(message: types.Message, user_id: int, back: str, is_edit: bool) -> bool:
+    user = db.get_user_details(user_id)
+    if not user:
+        return False
+    send = message.edit_text if is_edit else message.reply
+    await send(render_user_card(user), reply_markup=user_card_keyboard(user, back))
+    return True
+
+
+async def perform_user_search(
+    message: types.Message, search_term: str, state: FSMContext, is_edit: bool = False
+):
+    term = search_term.strip()
+    await state.update_data(last_search_term=term)
+    users = db.search_users(term) if term else []
+
+    if users:
+        text = f"🔍 <b>{len(users)} result(s) for</b> <code>{escape(term)}</code>\n\n"
+        text += "\n".join(user_row_line(u) for u in users)
+    else:
+        text = f"❌ No users found for <code>{escape(term)}</code>"
+
+    builder = InlineKeyboardBuilder()
+    add_user_buttons(builder, users, back="s")
+    builder.row(
+        InlineKeyboardButton(text="🔍 New search", callback_data="search_user"),
+        back_button("h"),
+    )
+
+    send = message.edit_text if is_edit else message.reply
+    await send(text, reply_markup=builder.as_markup())
+
+
+@panel.message(Command("admin"))
 async def get_stats(message: types.Message):
-    if message.from_user.id != DAMIR_USER_ID:
-        return await message.reply("🚫 You can't use this command.")
-
-    stats = db.get_stats()
-    stats_text = generate_stats_text(stats)
-
-    search_button = InlineKeyboardButton(text="🔍 Search User", callback_data="search_user")
-
-    extended_keyboard = []
-    if hasattr(ADMIN_KEYBOARD, "inline_keyboard"):
-        extended_keyboard = ADMIN_KEYBOARD.inline_keyboard.copy()
-
-    extended_keyboard.append([search_button])
-    extended_admin_keyboard = InlineKeyboardMarkup(inline_keyboard=extended_keyboard)
-
-    await message.reply(stats_text, reply_markup=extended_admin_keyboard)
+    await show_dashboard(message)
 
 
-@router.message(Command("users"))
+@panel.message(Command("users"))
 async def view_users_command(message: types.Message):
-    if message.from_user.id != DAMIR_USER_ID:
-        return await message.reply("🚫 You can't use this command.")
-
     await show_users_page(message, page=0)
 
 
-@router.message(Command("search"))
-async def search_user_command(message: types.Message, command: CommandObject):
-    if message.from_user.id != DAMIR_USER_ID:
-        return await message.reply("🚫 You can't use this command.")
+@panel.message(Command(re.compile(r"u(\d+)$")))
+async def user_card_command(message: types.Message, command: CommandObject):
+    user_id = int(command.regexp_match.group(1))
+    if not await show_user_card(message, user_id, back="h", is_edit=False):
+        await message.reply(f"❌ No user with ID <code>{user_id}</code>")
 
+
+@panel.message(Command("search"))
+async def search_user_command(message: types.Message, command: CommandObject, state: FSMContext):
     if command.args:
-        search_term = command.args.strip()
-        await perform_user_search(message, search_term)
+        await perform_user_search(message, command.args, state)
     else:
-        await message.reply(
-            "🔍 <b>Search Users</b>\n\n"
-            "Please provide a search term:\n"
-            "• User ID (e.g., 123456789)\n"
-            "• Username (e.g., john_doe)\n"
-            "• First/Last name\n\n"
-            "Example: <code>/search 123456789</code>\n"
-            "Example: <code>/search john_doe</code>"
-        )
+        await message.reply(SEARCH_HELP + "\n\nExample: <code>/search john</code>")
 
 
-async def perform_user_search(message: types.Message, search_term: str, is_edit: bool = False):
-    """Perform user search and display results."""
-    if not search_term.strip():
-        text = "❌ Please provide a valid search term."
-        if is_edit:
-            await message.edit_text(text)
-        else:
-            await message.reply(text)
-        return
-
-    users = db.search_users(search_term.strip())
-
-    if not users:
-        text = f"❌ No users found for: <code>{search_term}</code>"
-        if is_edit:
-            await message.edit_text(text)
-        else:
-            await message.reply(text)
-        return
-
-    search_text = f"🔍 <b>Search Results for:</b> <code>{search_term}</code>\n\n"
-    search_text += f"Found {len(users)} user(s):\n\n"
-
-    buttons = []
-    for i, user in enumerate(users, 1):
-        username_display = f"@{user['username']}" if user["username"] else "No username"
-        name_display = f"{user['first_name'] or ''} {user['last_name'] or ''}".strip()
-        if not name_display:
-            name_display = "No name"
-
-        joined_display = user["joined_at"].strftime("%Y-%m-%d")
-
-        search_text += (
-            f"{i}. ID: <code>{user['user_id']}</code>\n"
-            f"   👤 {username_display}\n"
-            f"   📝 {name_display}\n"
-            f"   📅 {joined_display}\n\n"
-        )
-
-        if i <= 10:
-            button_text = f"{i}. {username_display[:15]}"
-            buttons.append(
-                [
-                    InlineKeyboardButton(
-                        text=button_text,
-                        callback_data=f"search_user_details:{user['user_id']}:{search_term}",
-                    )
-                ]
-            )
-
-    if len(users) > 10:
-        search_text += f"... and {len(users) - 10} more users\n\n"
-
-    # Add navigation buttons
-    nav_buttons = [
-        InlineKeyboardButton(text="🔍 New Search", callback_data="search_user"),
-        InlineKeyboardButton(text="👥 All Users", callback_data="view_users:0"),
-    ]
-    buttons.append(nav_buttons)
-
-    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
-
-    if is_edit:
-        await message.edit_text(search_text, reply_markup=keyboard)
-    else:
-        await message.reply(search_text, reply_markup=keyboard)
-
-
-# Callback handlers
-@router.callback_query(F.data == "refresh_admin")
+@panel.callback_query(F.data == "refresh_admin")
 async def refresh_stats(callback_query: types.CallbackQuery):
-    if callback_query.from_user.id != DAMIR_USER_ID:
-        return await callback_query.answer("🚫 You can't use this feature.", show_alert=True)
-
-    stats = db.get_stats()
-    stats_text = generate_stats_text(stats)
-
-    search_button = InlineKeyboardButton(text="🔍 Search User", callback_data="search_user")
-
-    extended_keyboard = []
-    if hasattr(ADMIN_KEYBOARD, "inline_keyboard"):
-        extended_keyboard = ADMIN_KEYBOARD.inline_keyboard.copy()
-
-    extended_keyboard.append([search_button])
-    extended_admin_keyboard = InlineKeyboardMarkup(inline_keyboard=extended_keyboard)
-
-    await callback_query.message.edit_text(stats_text, reply_markup=extended_admin_keyboard)
-
-    await callback_query.answer("Stats updated!")
+    await show_dashboard(callback_query.message, is_edit=True)
+    await callback_query.answer("Updated")
 
 
-@router.callback_query(F.data == "search_user")
+@panel.callback_query(F.data == "search_user")
 async def search_user_callback(callback_query: types.CallbackQuery, state: FSMContext):
-    if callback_query.from_user.id != DAMIR_USER_ID:
-        return await callback_query.answer("🚫 You can't use this feature.", show_alert=True)
-
     await state.set_state(SearchStates.waiting_for_search_term)
     await state.update_data(message_to_edit=callback_query.message)
 
-    cancel_button = InlineKeyboardButton(text="❌ Cancel", callback_data="cancel_search")
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[cancel_button]])
-
-    await callback_query.message.edit_text(
-        "🔍 <b>Search Users</b>\n\n"
-        "Send me the search term:\n"
-        "• User ID (e.g., 123456789)\n"
-        "• Username (e.g., john_doe)\n"
-        "• First/Last name\n\n"
-        "Just type and send your search term...",
-        reply_markup=keyboard,
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="❌ Cancel", callback_data="cancel_search")]]
     )
-
+    await callback_query.message.edit_text(SEARCH_HELP, reply_markup=keyboard)
     await callback_query.answer()
 
 
-@router.message(SearchStates.waiting_for_search_term)
+@panel.message(SearchStates.waiting_for_search_term)
 async def process_search_term(message: types.Message, state: FSMContext):
-    if message.from_user.id != DAMIR_USER_ID:
-        return
-
-    data = await state.get_data()
-    original_message = data.get("message_to_edit")
-
-    search_term = message.text.strip()
+    original_message = (await state.get_data()).get("message_to_edit")
+    await state.clear()
 
     try:
         await message.delete()
@@ -199,191 +137,95 @@ async def process_search_term(message: types.Message, state: FSMContext):
         pass
 
     if original_message:
-        await perform_user_search(original_message, search_term, is_edit=True)
-
-    await state.clear()
+        await perform_user_search(original_message, message.text or "", state, is_edit=True)
 
 
-@router.callback_query(F.data == "cancel_search")
+@panel.callback_query(F.data == "cancel_search")
 async def cancel_search(callback_query: types.CallbackQuery, state: FSMContext):
-    if callback_query.from_user.id != DAMIR_USER_ID:
-        return await callback_query.answer("🚫 You can't use this feature.", show_alert=True)
-
     await state.clear()
-
-    stats = db.get_stats()
-    stats_text = generate_stats_text(stats)
-
-    search_button = InlineKeyboardButton(text="🔍 Search User", callback_data="search_user")
-    extended_keyboard = []
-    if hasattr(ADMIN_KEYBOARD, "inline_keyboard"):
-        extended_keyboard = ADMIN_KEYBOARD.inline_keyboard.copy()
-
-    extended_keyboard.append([search_button])
-    extended_admin_keyboard = InlineKeyboardMarkup(inline_keyboard=extended_keyboard)
-
-    await callback_query.message.edit_text(stats_text, reply_markup=extended_admin_keyboard)
+    await show_dashboard(callback_query.message, is_edit=True)
     await callback_query.answer("Search cancelled")
 
 
-@router.callback_query(F.data.startswith("search_user_details:"))
-async def search_user_details_callback(callback_query: types.CallbackQuery, state: FSMContext):
-    if callback_query.from_user.id != DAMIR_USER_ID:
-        return await callback_query.answer("🚫 You can't use this feature.", show_alert=True)
-
-    parts = callback_query.data.split(":")
-    user_id = int(parts[1])
-    search_term = parts[2] if len(parts) > 2 else ""
-
-    user_details = db.get_user_details(user_id)
-    if not user_details:
-        await callback_query.answer("User not found.", show_alert=True)
-        return
-
-    if search_term:
-        await state.update_data(last_search_term=search_term)
-
-    joined_at = user_details["joined_at"]
-    joined_at_oral = (
-        joined_at.replace(tzinfo=pytz.utc)
-        .astimezone(pytz.timezone("Etc/GMT-5"))
-        .strftime("%Y-%m-%d %H:%M:%S")
-    )
-
-    details_text = (
-        f"👤 <b>User Details</b>\n\n"
-        f"ID: <code>{user_details['user_id']}</code>\n"
-        f"Username: {('@' + user_details['username']) if user_details['username'] else 'Not set'}\n"
-        f"Name: {user_details['first_name'] or ''} {user_details['last_name'] or ''}\n"
-        f"Joined: {joined_at_oral}\n\n"
-        f"Commands used: {user_details['command_count']}\n"
-        f"Files saved: {user_details['saved_files']}\n\n"
-        f"<b>Last 5 commands:</b>\n"
-    )
-
-    for cmd in user_details["recent_commands"]:
-        cmd_time_oral = (
-            cmd["used_at"]
-            .replace(tzinfo=pytz.utc)
-            .astimezone(pytz.timezone("Etc/GMT-5"))
-            .strftime("%Y-%m-%d %H:%M:%S")
-        )
-        details_text += f"/{cmd['command']} - {cmd_time_oral}\n"
-
-    # Back to search results or users list
-    buttons = []
-    if search_term:
-        back_button = InlineKeyboardButton(
-            text="« Back to Search", callback_data="back_to_search_results"
-        )
-    else:
-        back_button = InlineKeyboardButton(text="« Back to Users", callback_data="view_users:0")
-
-    buttons.append([back_button])
-    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
-
-    await callback_query.message.edit_text(details_text, reply_markup=keyboard)
-    await callback_query.answer()
-
-
-@router.callback_query(F.data == "back_to_search_results")
+@panel.callback_query(F.data == "back_to_search_results")
 async def back_to_search_results(callback_query: types.CallbackQuery, state: FSMContext):
-    if callback_query.from_user.id != DAMIR_USER_ID:
-        return await callback_query.answer("🚫 You can't use this feature.", show_alert=True)
-
-    data = await state.get_data()
-    search_term = data.get("last_search_term")
+    search_term = (await state.get_data()).get("last_search_term")
 
     if search_term:
-        await perform_user_search(callback_query.message, search_term, is_edit=True)
+        await perform_user_search(callback_query.message, search_term, state, is_edit=True)
     else:
         await callback_query.message.edit_text(
-            "🔍 Please use /search command or click 'Search User' button to perform a new search.",
+            SEARCH_HELP,
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [InlineKeyboardButton(text="🔍 New Search", callback_data="search_user")],
-                    [InlineKeyboardButton(text="📊 Admin Panel", callback_data="refresh_admin")],
+                    [InlineKeyboardButton(text="🔍 New search", callback_data="search_user")],
+                    [back_button("h")],
                 ]
             ),
         )
     await callback_query.answer()
 
 
-@router.callback_query(F.data.startswith("view_users:"))
+@panel.callback_query(F.data.startswith("view_users:"))
 async def users_pagination_callback(callback_query: types.CallbackQuery):
-    if callback_query.from_user.id != DAMIR_USER_ID:
-        return await callback_query.answer("🚫 You can't use this feature.", show_alert=True)
-
     page = int(callback_query.data.split(":")[1])
     await show_users_page(callback_query.message, page, is_edit=True)
     await callback_query.answer()
 
 
-@router.callback_query(F.data.startswith("user_details:"))
+@panel.callback_query(F.data.startswith("user_details:"))
 async def user_details_callback(callback_query: types.CallbackQuery):
-    if callback_query.from_user.id != DAMIR_USER_ID:
-        return await callback_query.answer("🚫 You can't use this feature.", show_alert=True)
-
-    user_id = int(callback_query.data.split(":")[1])
-    page = int(callback_query.data.split(":")[2])
-
-    user_details = db.get_user_details(user_id)
-
-    if not user_details:
-        await callback_query.answer("User not found.", show_alert=True)
-        return
-
-    joined_at_oral = (
-        user_details["joined_at"]
-        .replace(tzinfo=pytz.utc)
-        .astimezone(pytz.timezone("Etc/GMT-5"))
-        .strftime("%Y-%m-%d %H:%M:%S")
-    )
-
-    details_text = (
-        f"👤 <b>User Details</b>\n\n"
-        f"ID: <code>{user_details['user_id']}</code>\n"
-        f"Username: {('@' + user_details['username']) if user_details['username'] else 'Not set'}\n"
-        f"Name: {user_details['first_name'] or ''} {user_details['last_name'] or ''}\n"
-        f"Joined: {joined_at_oral}\n\n"
-        f"Commands used: {user_details['command_count']}\n"
-        f"Files saved: {user_details['saved_files']}\n\n"
-        f"<b>Last 5 commands:</b>\n"
-    )
-
-    for cmd in user_details["recent_commands"]:
-        cmd_time_oral = (
-            cmd["used_at"]
-            .replace(tzinfo=pytz.utc)
-            .astimezone(pytz.timezone("Etc/GMT-5"))
-            .strftime("%Y-%m-%d %H:%M:%S")
-        )
-        details_text += f"/{cmd['command']} - {cmd_time_oral}\n"
-
-    back_button = types.InlineKeyboardButton(
-        text="« Back to Users", callback_data=f"view_users:{page}"
-    )
-    keyboard = types.InlineKeyboardMarkup(inline_keyboard=[[back_button]])
-
-    await callback_query.message.edit_text(details_text, reply_markup=keyboard)
+    _, user_id, back = callback_query.data.split(":")
+    if not await show_user_card(callback_query.message, int(user_id), back, is_edit=True):
+        return await callback_query.answer("User not found.", show_alert=True)
     await callback_query.answer()
 
 
-@router.message(Command("get"))
+@panel.callback_query(F.data.startswith("admin_files:"))
+async def admin_files_callback(callback_query: types.CallbackQuery):
+    _, user_id, page, back = callback_query.data.split(":")
+    user_id, page = int(user_id), int(page)
+    user = db.get_user_details(user_id)
+    if not user:
+        return await callback_query.answer("User not found.", show_alert=True)
+
+    files = db.get_user_saved_files(user_id, page, ADMIN_FILES_PER_PAGE)
+    text = (
+        f"📂 <b>Saved files</b> · {user['saved_files']} total\n"
+        f"{user_row_line(user)}\n\n"
+        "Tap a file to get it here."
+    )
+    keyboard = saved_files_keyboard(user_id, files, page, user["saved_files"], back)
+    await callback_query.message.edit_text(text, reply_markup=keyboard)
+    await callback_query.answer()
+
+
+# Saved file type prefix -> Bot method that can resend that file_id.
+SEND_BY_TYPE = {"audio": "send_audio", "video": "send_video", "voice": "send_voice"}
+
+
+@panel.callback_query(F.data.startswith("admin_file:"))
+async def admin_file_callback(callback_query: types.CallbackQuery, bot: Bot):
+    file = db.get_file_by_id(int(callback_query.data.split(":")[1]))
+    if not file:
+        return await callback_query.answer("File not found.", show_alert=True)
+
+    send = getattr(bot, SEND_BY_TYPE.get(file["type"].split("/")[0], "send_document"))
+    caption = f"📂 {escape(file['type'])} · saved {fmt_ts(file['saved_at'])} by /u{file['user_id']}"
+    try:
+        await send(callback_query.message.chat.id, file["file_id"], caption=caption)
+        await callback_query.answer()
+    except Exception as e:
+        await callback_query.answer(f"Failed to send: {e}"[:200], show_alert=True)
+
+
+@panel.message(Command("get"))
 async def send_file(message: types.Message, command: CommandObject, bot: Bot):
-    if message.from_user.id != DAMIR_USER_ID:
-        return await message.reply("🚫 You can't use this command.")
-
-    args = command.args
-
-    if not args:
-        await message.reply("Usage: /get {file_id}")
-        return
-
-    file_id = args.strip()
+    if not command.args:
+        return await message.reply("Usage: /get {file_id}")
 
     try:
-        await bot.send_document(chat_id=message.chat.id, document=file_id)
+        await bot.send_document(chat_id=message.chat.id, document=command.args.strip())
     except Exception as e:
         await message.reply(f"Failed to send file: {e}")
 

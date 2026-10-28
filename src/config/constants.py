@@ -130,8 +130,11 @@ CLOSE_BUTTON = InlineKeyboardMarkup(
 
 ADMIN_KEYBOARD = InlineKeyboardMarkup(
     inline_keyboard=[
+        [
+            InlineKeyboardButton(text="👥 Users", callback_data="view_users:0"),
+            InlineKeyboardButton(text="🔍 Search", callback_data="search_user"),
+        ],
         [InlineKeyboardButton(text="🔄 Refresh", callback_data="refresh_admin")],
-        [InlineKeyboardButton(text="👥 View All Users", callback_data="view_users:0")],
     ]
 )
 

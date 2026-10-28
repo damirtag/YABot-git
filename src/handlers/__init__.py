@@ -1,6 +1,6 @@
 from aiogram import Dispatcher
 
-from utils.middlewares import HandlerMiddleware
+from utils.middlewares import HandlerMiddleware, MemberTrackerMiddleware
 
 from . import admin, callbacks, commands, common, inline, jokes, media, voice
 
@@ -10,6 +10,7 @@ def setup_routers(dp: Dispatcher):
     middleware = HandlerMiddleware()
     for observer in (dp.message, dp.callback_query, dp.inline_query, dp.chosen_inline_result):
         observer.middleware(middleware)
+    dp.message.outer_middleware(MemberTrackerMiddleware())
 
     dp.include_router(admin.router)
     dp.include_router(commands.router)

@@ -8,6 +8,29 @@ from config.constants import CACHE_CHAT
 from config.settings import DB_CONFIG
 from utils import ConsoleColors
 
+# Columns + mapper shared by every query that returns a user row for the admin UI.
+USER_ROW_SQL = """
+    SELECT u.user_id, u.username, u.first_name, u.last_name, u.joined_at,
+        (SELECT COUNT(*) FROM commands c WHERE c.user_id = u.user_id),
+        (SELECT COUNT(*) FROM user_saved s WHERE s.user_id = u.user_id)
+    FROM users u
+"""
+
+
+USER_ROW_KEYS = (
+    "user_id",
+    "username",
+    "first_name",
+    "last_name",
+    "joined_at",
+    "command_count",
+    "saved_files",
+)
+
+
+def _user_row(row: tuple) -> dict[str, Any]:
+    return dict(zip(USER_ROW_KEYS, row, strict=True))
+
 
 class DB_actions:
     def __init__(self):
@@ -75,6 +98,20 @@ class DB_actions:
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
+                cursor.execute("ALTER TABLE chats ADD COLUMN IF NOT EXISTS title VARCHAR(255)")
+
+                # Which users were seen in which groups (MemberTrackerMiddleware).
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS chat_members (
+                        chat_id BIGINT NOT NULL,
+                        user_id BIGINT NOT NULL,
+                        last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (chat_id, user_id)
+                    )
+                """)
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_chat_members_user ON chat_members (user_id)"
+                )
 
                 # Voice settings table
                 cursor.execute("""
@@ -126,6 +163,19 @@ class DB_actions:
                         voted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         UNIQUE (joke_id, voter_id)
                     )
+                """)
+
+                # Backfill group membership from joke authors/voters (pre-tracker history).
+                cursor.execute("""
+                    INSERT INTO chat_members (chat_id, user_id, last_seen)
+                    SELECT chat_id, user_id, MAX(seen) FROM (
+                        SELECT chat_id, author_id AS user_id, created_at AS seen FROM jokes
+                        UNION ALL
+                        SELECT j.chat_id, v.voter_id, v.voted_at
+                        FROM joke_votes v JOIN jokes j ON j.id = v.joke_id
+                    ) t
+                    GROUP BY chat_id, user_id
+                    ON CONFLICT DO NOTHING
                 """)
 
                 # Marker so the weekly leaderboard is posted at most once per chat/week.
@@ -284,36 +334,11 @@ class DB_actions:
         )
 
     def get_all_users(self, limit: int = 10, offset: int = 0) -> list[dict[str, Any]]:
-        """Get users with pagination."""
-        try:
-            with closing(self._get_connection()) as conn:
-                with closing(conn.cursor()) as cursor:
-                    cursor.execute(
-                        """
-                        SELECT user_id, username, first_name, last_name, joined_at
-                        FROM users
-                        ORDER BY joined_at DESC
-                        LIMIT %s OFFSET %s
-                    """,
-                        (limit, offset),
-                    )
-
-                    users = []
-                    for row in cursor.fetchall():
-                        users.append(
-                            {
-                                "user_id": row[0],
-                                "username": row[1],
-                                "first_name": row[2],
-                                "last_name": row[3],
-                                "joined_at": row[4],
-                            }
-                        )
-
-                    return users
-        except psycopg2.Error as e:
-            self.logger.error(f"Error getting users: {e}")
-            return []
+        """Get users (newest first) with their command / saved-file counts."""
+        rows = self.execute_query(
+            USER_ROW_SQL + "ORDER BY u.joined_at DESC LIMIT %s OFFSET %s", (limit, offset)
+        )
+        return [_user_row(r) for r in rows]
 
     def get_total_users_count(self) -> int:
         """Get total number of users."""
@@ -327,61 +352,64 @@ class DB_actions:
             return 0
 
     def get_user_details(self, user_id: int) -> dict[str, Any] | None:
-        """Get detailed information about a specific user."""
-        try:
-            with closing(self._get_connection()) as conn:
-                with closing(conn.cursor()) as cursor:
-                    cursor.execute(
-                        """
-                        SELECT user_id, username, first_name, last_name, joined_at
-                        FROM users
-                        WHERE user_id = %s
-                    """,
-                        (user_id,),
-                    )
-
-                    user_row = cursor.fetchone()
-                    if not user_row:
-                        return None
-
-                    cursor.execute("SELECT COUNT(*) FROM commands WHERE user_id = %s", (user_id,))
-                    command_count = cursor.fetchone()[0]
-
-                    cursor.execute("SELECT COUNT(*) FROM user_saved WHERE user_id = %s", (user_id,))
-                    saved_files = cursor.fetchone()[0]
-
-                    cursor.execute(
-                        """
-                        SELECT command, used_at FROM commands
-                        WHERE user_id = %s
-                        ORDER BY used_at DESC
-                        LIMIT 5
-                    """,
-                        (user_id,),
-                    )
-
-                    recent_commands = []
-                    for row in cursor.fetchall():
-                        recent_commands.append({"command": row[0], "used_at": row[1]})
-
-                    return {
-                        "user_id": user_row[0],
-                        "username": user_row[1],
-                        "first_name": user_row[2],
-                        "last_name": user_row[3],
-                        "joined_at": user_row[4],
-                        "command_count": command_count,
-                        "saved_files": saved_files,
-                        "recent_commands": recent_commands,
-                    }
-        except psycopg2.Error as e:
-            self.logger.error(f"Error getting user details: {e}")
+        """Everything the admin user card shows: profile, activity, groups."""
+        row = self.execute_query(USER_ROW_SQL + "WHERE u.user_id = %s", (user_id,), fetch_all=False)
+        if not row:
             return None
+        user = _user_row(row)
 
-    def add_chat(self, chat_id: str) -> None:
-        """Add or update a chat in the database."""
-        query = "INSERT INTO chats (chat_id) VALUES (%s) ON CONFLICT (chat_id) DO NOTHING"
-        self.execute_query(query, (chat_id,))
+        user["last_active"] = self.execute_query(
+            "SELECT MAX(used_at) FROM commands WHERE user_id = %s", (user_id,), fetch_all=False
+        )[0]
+        user["top_commands"] = self.execute_query(
+            """
+            SELECT command, COUNT(*) FROM commands WHERE user_id = %s
+            GROUP BY command ORDER BY COUNT(*) DESC, command LIMIT 5
+        """,
+            (user_id,),
+        )
+        user["recent_commands"] = [
+            {"command": cmd, "used_at": used_at}
+            for cmd, used_at in self.execute_query(
+                "SELECT command, used_at FROM commands WHERE user_id = %s "
+                "ORDER BY used_at DESC LIMIT 5",
+                (user_id,),
+            )
+        ]
+        user["groups"] = [
+            {"chat_id": chat_id, "title": title, "last_seen": last_seen}
+            for chat_id, title, last_seen in self.execute_query(
+                """
+                SELECT cm.chat_id, c.title, cm.last_seen
+                FROM chat_members cm
+                LEFT JOIN chats c ON c.chat_id = cm.chat_id::text
+                WHERE cm.user_id = %s
+                ORDER BY cm.last_seen DESC
+            """,
+                (user_id,),
+            )
+        ]
+        return user
+
+    def track_member(self, chat_id: int, title: str | None, user_id: int) -> None:
+        """Record that a user was seen in a group; refreshes the group's title."""
+        with closing(self._get_connection()) as conn:
+            with closing(conn.cursor()) as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO chats (chat_id, title) VALUES (%s, %s)
+                    ON CONFLICT (chat_id) DO UPDATE SET title = EXCLUDED.title
+                """,
+                    (str(chat_id), title),
+                )
+                cursor.execute(
+                    """
+                    INSERT INTO chat_members (chat_id, user_id) VALUES (%s, %s)
+                    ON CONFLICT (chat_id, user_id) DO UPDATE SET last_seen = CURRENT_TIMESTAMP
+                """,
+                    (chat_id, user_id),
+                )
+                conn.commit()
 
     def log_command(self, user_id: int, command: str) -> None:
         """Log a command usage in the database."""
@@ -500,55 +528,20 @@ class DB_actions:
         return stats
 
     def search_users(self, search_term: str) -> list[dict[str, Any]]:
-        """Search users by username or user_id."""
-        try:
-            with closing(self._get_connection()) as conn:
-                with closing(conn.cursor()) as cursor:
-                    # Try to convert search term to integer for ID search
-                    try:
-                        user_id = int(search_term)
-                        # Search by exact user_id or username containing the term
-                        cursor.execute(
-                            """
-                            SELECT user_id, username, first_name, last_name, joined_at
-                            FROM users
-                            WHERE user_id = %s OR username ILIKE %s
-                            ORDER BY 
-                                CASE WHEN user_id = %s THEN 1 ELSE 2 END,
-                                joined_at DESC
-                            LIMIT 20
-                        """,
-                            (user_id, f"%{search_term}%", user_id),
-                        )
-                    except ValueError:
-                        # Search only by username if not a number
-                        cursor.execute(
-                            """
-                            SELECT user_id, username, first_name, last_name, joined_at
-                            FROM users
-                            WHERE username ILIKE %s OR first_name ILIKE %s OR last_name ILIKE %s
-                            ORDER BY joined_at DESC
-                            LIMIT 20
-                        """,
-                            (f"%{search_term}%", f"%{search_term}%", f"%{search_term}%"),
-                        )
-
-                    users = []
-                    for row in cursor.fetchall():
-                        users.append(
-                            {
-                                "user_id": row[0],
-                                "username": row[1],
-                                "first_name": row[2],
-                                "last_name": row[3],
-                                "joined_at": row[4],
-                            }
-                        )
-
-                    return users
-        except psycopg2.Error as e:
-            self.logger.error(f"Error searching users: {e}")
-            return []
+        """Search users by exact id, or username / first / last name substring."""
+        like = f"%{search_term}%"
+        user_id = int(search_term) if search_term.lstrip("-").isdigit() else None
+        rows = self.execute_query(
+            USER_ROW_SQL
+            + """
+            WHERE u.user_id = %s OR u.username ILIKE %s
+                OR u.first_name ILIKE %s OR u.last_name ILIKE %s
+            ORDER BY u.user_id = %s DESC, u.joined_at DESC
+            LIMIT 20
+        """,
+            (user_id, like, like, like, user_id),
+        )
+        return [_user_row(r) for r in rows]
 
     def backup_database(self, backup_path: str) -> bool:
         """Create a backup of the database using pg_dump."""

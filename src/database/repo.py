@@ -499,66 +499,6 @@ class DB_actions:
 
         return stats
 
-    def get_user_stats(self, user_id: int) -> dict[str, Any]:
-        """Get statistics for a specific user."""
-        user_stats = {}
-
-        # Basic user info
-        user_info = self.execute_query(
-            """
-            SELECT username, first_name, last_name, joined_at
-            FROM users
-            WHERE user_id = %s
-        """,
-            (user_id,),
-        )
-
-        if not user_info:
-            return {"error": "User not found"}
-
-        user_stats["username"] = user_info[0][0]
-        user_stats["first_name"] = user_info[0][1]
-        user_stats["last_name"] = user_info[0][2]
-        user_stats["joined_at"] = user_info[0][3]
-
-        # Command count
-        user_stats["command_count"] = self.execute_query(
-            "SELECT COUNT(*) FROM commands WHERE user_id = %s", (user_id,)
-        )[0][0]
-
-        # Top commands used
-        user_stats["top_commands"] = self.execute_query(
-            """
-            SELECT command, COUNT(*) 
-            FROM commands 
-            WHERE user_id = %s
-            GROUP BY command 
-            ORDER BY COUNT(*) DESC 
-            LIMIT 5
-        """,
-            (user_id,),
-        )
-
-        # Saved files count
-        user_stats["saved_files_count"] = self.execute_query(
-            "SELECT COUNT(*) FROM user_saved WHERE user_id = %s", (user_id,)
-        )[0][0]
-
-        return user_stats
-
-    def get_activity_timeline(self, days: int = 30) -> list[tuple[str, int]]:
-        """Get command activity over a specified number of days."""
-        return self.execute_query(
-            """
-            SELECT DATE(used_at) as day, COUNT(*) as count
-            FROM commands
-            WHERE used_at >= CURRENT_DATE - INTERVAL '%s days'
-            GROUP BY DATE(used_at)
-            ORDER BY day
-        """,
-            (days,),
-        )
-
     def search_users(self, search_term: str) -> list[dict[str, Any]]:
         """Search users by username or user_id."""
         try:

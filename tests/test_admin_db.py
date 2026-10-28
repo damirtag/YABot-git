@@ -43,6 +43,17 @@ def test_tracked_groups_show_on_user_details(db):
     assert sorted((g["chat_id"], g["title"]) for g in groups) == [(-200, None), (-100, "Zion")]
 
 
+def test_groups_work_when_chats_chat_id_is_bigint(db):
+    # Production's chats table predates init_db and stores chat_id as BIGINT.
+    db.execute_query("ALTER TABLE chats ALTER COLUMN chat_id TYPE BIGINT USING chat_id::bigint")
+    db.add_user(7, "neo", None, None)
+    db.track_member(-100, "Zion", 7)
+
+    assert [(g["chat_id"], g["title"]) for g in db.get_user_details(7)["groups"]] == [
+        (-100, "Zion")
+    ]
+
+
 def test_init_db_backfills_membership_from_jokes_idempotently(db):
     db.add_user(7, "neo", None, None)
     joke_id = db.create_joke(-300, 9, "author", 1)

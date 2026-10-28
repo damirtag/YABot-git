@@ -382,7 +382,7 @@ class DB_actions:
                 """
                 SELECT cm.chat_id, c.title, cm.last_seen
                 FROM chat_members cm
-                LEFT JOIN chats c ON c.chat_id = cm.chat_id::text
+                LEFT JOIN chats c ON c.chat_id::text = cm.chat_id::text  -- chat_id is VARCHAR or BIGINT (prod)
                 WHERE cm.user_id = %s
                 ORDER BY cm.last_seen DESC
             """,

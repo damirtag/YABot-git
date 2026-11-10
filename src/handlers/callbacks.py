@@ -22,9 +22,9 @@ from services.yandexmusic import YandexMusicSDK
 from utils import Tools
 from utils.helpers import (
     build_delete_confirmation_keyboard,
-    cover_thumbnail,
     build_file_action_keyboard,
     build_saved_files_keyboard,
+    cover_thumbnail,
 )
 
 router = Router()

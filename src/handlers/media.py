@@ -26,6 +26,7 @@ from services.tiktok import TikTok
 from services.yandexmusic import TrackData, YandexMusicSDK
 from services.youtube import YouTubeSDK
 from utils import YANDEX_MUSIC_TRACK_CAPTION, ConsoleColors, RegexFilter, Tools
+from utils.helpers import cover_thumbnail
 
 logger = logging.getLogger()
 router = Router()
@@ -607,6 +608,7 @@ async def soundload(message: types.Message, bot: Bot):
                         duration=int(track.duration),
                         performer=track.artists,
                         title=track.title,
+                        thumbnail=cover_thumbnail(track.cover),
                         reply_markup=SAVE_BUTTON if message.chat.type == "private" else None,
                     )
                     cached_audio = await bot.copy_message(

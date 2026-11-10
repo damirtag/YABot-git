@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from html import escape
 
@@ -17,6 +18,16 @@ FILE_ICONS = {"audio": "🎵", "video": "🎬", "voice": "🎙"}
 
 # Admin navigation: a user card remembers where it was opened from via `back`:
 #   "<page>" -> users list page, "s" -> last search results, "h" -> dashboard.
+
+
+def cover_thumbnail(cover_url: str | None) -> types.URLInputFile | None:
+    """Telegram ignores embedded ID3 cover art; send_audio needs an explicit
+    thumbnail that is JPEG and at most 320x320, so downsize known CDN URLs."""
+    if not cover_url:
+        return None
+    url = cover_url.replace("1000x1000", "300x300")  # yandex: size is in the path
+    url = re.sub(r"-(original|large|t\d+x\d+)\.(jpe?g|png)$", "-t300x300.jpg", url)  # soundcloud
+    return types.URLInputFile(url)
 
 
 def fmt_ts(dt: datetime | None, fmt: str = "%Y-%m-%d %H:%M") -> str:

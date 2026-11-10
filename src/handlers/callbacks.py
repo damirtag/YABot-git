@@ -22,6 +22,7 @@ from services.yandexmusic import YandexMusicSDK
 from utils import Tools
 from utils.helpers import (
     build_delete_confirmation_keyboard,
+    cover_thumbnail,
     build_file_action_keyboard,
     build_saved_files_keyboard,
 )
@@ -304,6 +305,7 @@ async def download_yandex_track(callback_query: types.CallbackQuery, bot: Bot):
                 title=track.title,
                 performer=track.artists,
                 duration=int(track.duration),
+                thumbnail=cover_thumbnail(track.cover),
                 reply_markup=SAVE_BUTTON if callback_query.message.chat.type == "private" else None,
                 reply_to_message_id=callback_query.message.reply_to_message.message_id
                 if callback_query.message.reply_to_message
@@ -381,6 +383,7 @@ async def download_soundcl_track(callback_query: types.CallbackQuery, bot: Bot):
             title=track.title,
             performer=track.artists,
             duration=int(track.duration),
+            thumbnail=cover_thumbnail(track.cover),
             reply_markup=SAVE_BUTTON if callback_query.message.chat.type == "private" else None,
             reply_to_message_id=callback_query.message.reply_to_message.message_id
             if callback_query.message.reply_to_message

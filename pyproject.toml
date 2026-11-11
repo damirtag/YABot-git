@@ -32,6 +32,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "black>=26.10.1",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "ruff>=0.8",
@@ -74,3 +75,22 @@ unresolved-import = "warn"
 invalid-argument-type = "warn"
 invalid-assignment = "warn"
 invalid-parameter-default = "warn"
+
+[tool.black]
+line-length = 100
+target-version = ["py313"]
+
+# Pylance/pyright (VS Code). Mirrors ty's leniency: aiogram types are full of
+# Optionals and dynamic attributes, so silence that noise; ty still reports it.
+[tool.pyright]
+include = ["src", "tests"]
+extraPaths = ["src"]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.13"
+typeCheckingMode = "standard"
+reportOptionalMemberAccess = "none"
+reportOptionalSubscript = "none"
+reportAttributeAccessIssue = "none"
+reportArgumentType = "none"
+reportAssignmentType = "none"

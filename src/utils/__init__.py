@@ -100,9 +100,9 @@ class RegexFilter(filters.BaseFilter):
         self.pattern = pattern
 
     async def __call__(self, message: types.Message):
-        if not message.text:
-            return False
-        return bool(re.search(self.pattern, message.text))
+        # Injects the matched text as `link` into handlers that declare it.
+        match = re.search(self.pattern, message.text or "")
+        return {"link": match.group(0)} if match else False
 
 
 @dataclass

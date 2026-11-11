@@ -533,8 +533,7 @@ class DB_actions:
         like = f"%{search_term}%"
         user_id = int(search_term) if search_term.lstrip("-").isdigit() else None
         rows = self.execute_query(
-            USER_ROW_SQL
-            + """
+            USER_ROW_SQL + """
             WHERE u.user_id = %s OR u.username ILIKE %s
                 OR u.first_name ILIKE %s OR u.last_name ILIKE %s
             ORDER BY u.user_id = %s DESC, u.joined_at DESC
@@ -923,12 +922,10 @@ class DB_actions:
         try:
             with closing(self._get_connection()) as conn:
                 with closing(conn.cursor()) as cursor:
-                    cursor.execute(
-                        """
+                    cursor.execute("""
                         SELECT DISTINCT chat_id FROM jokes
                         WHERE created_at >= NOW() - INTERVAL '7 days'
-                        """
-                    )
+                        """)
                     return [int(r[0]) for r in cursor.fetchall()]
         except psycopg2.Error as e:
             self.logger.error(f"Error getting active joke chats: {e}")

@@ -53,7 +53,7 @@ class TikTok:
         self.search_videos_hashtag_endpoint = "api/challenge/search"
 
         self.logger = self._setup_logger()
-        self.result = None
+        self.result: dict = {}
         self.link = None
 
     async def __aenter__(self):
@@ -75,7 +75,7 @@ class TikTok:
         return logger
 
     async def _ensure_data(self, link: str):
-        if self.result is None or self.link != link:
+        if not self.result or self.link != link:
             self.link = link
             self.result = await self.fetch(link)
             self.logger.info("Successfully ensured data from the link")
@@ -181,7 +181,7 @@ class TikTok:
 
     async def search(
         self, method: Literal["keyword", "hashtag"], keyword: str, count: int = 10, cursor: int = 0
-    ) -> list:
+    ) -> list | None:
         """
         Search videos by keyword (default search) or hashtag
 
@@ -256,7 +256,9 @@ class TikTok:
         self.logger.info(f"Sound - Downloaded and saved sound as {audio_filename}")
         return audio_filename
 
-    async def download(self, link: str, video_filename: str | None = None, hd: bool = False) -> str:
+    async def download(
+        self, link: str, video_filename: str | None = None, hd: bool = False
+    ) -> data:
         """
         Asynchronously downloads a TikTok video or photo post.
 

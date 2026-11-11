@@ -194,10 +194,10 @@ class YandexMusicSDK:
             album_title=album.title,
             title=track.title,
             duration=self._convert_to_seconds(track.duration_ms),
-            artists=", ".join(a.name for a in track.artists),
+            artists=", ".join(a.name or "" for a in track.artists),
             caption=(
                 f"<a href='https://music.yandex.com/album/{album.id}/track/{track.id}'>"
-                f"{', '.join(a.name for a in track.artists)} — {track.title}</a>"
+                f"{', '.join(a.name or '' for a in track.artists)} — {track.title}</a>"
             ),
             filename=self._prepare_filename(track.id),
             download_info=download_info,
@@ -311,7 +311,7 @@ class YandexMusicSDK:
 
     @staticmethod
     def _prepare_filename(id: int):
-        return f"track_{id}.{CODEC}" if id else None
+        return f"track_{id}.{CODEC}"
 
     async def _extract_track_id(self, track: str | int) -> str | None:
         """Extract track ID from URL or input string/integer"""
@@ -334,7 +334,7 @@ class YandexMusicSDK:
             return None
 
     async def _download(
-        self, dwnld_info: list[DownloadInfo], filename: str | None, upload_dir: str | None = None
+        self, dwnld_info: list[DownloadInfo], filename: str, upload_dir: str | None = None
     ):
         self.logger.info(
             "Starting to download track\n"
@@ -442,7 +442,7 @@ class YandexMusicSDK:
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
             # Filter out None results and exceptions
-            return [r for r in results if r is not None and not isinstance(r, Exception)]
+            return [r for r in results if r is not None and not isinstance(r, BaseException)]
 
         except Exception as e:
             self.logger.error(f"Error: {e}")
@@ -470,11 +470,11 @@ class YandexMusicSDK:
                 raise ValueError("Incorrect Track ID or Track URL!")
 
             # Fetch track data
-            track = await self.client.tracks(track_id)
-            if not track or not track[0]:
+            tracks = await self.client.tracks(track_id)
+            if not tracks or not tracks[0]:
                 raise YandexMusicError("Failed to get track")
 
-            track: Track = track[0]  # API returns list of tracks
+            track = tracks[0]  # API returns list of tracks
             self.logger.info(
                 f"Fetched track: {track.title} | {self._convert_to_seconds(track.duration_ms)} sec"
             )
@@ -543,10 +543,10 @@ class YandexMusicSDK:
             album_id=album.id,
             title=last_track.title,
             duration=self._convert_to_seconds(last_track.duration_ms),
-            artists=", ".join(a.name for a in last_track.artists),
+            artists=", ".join(a.name or "" for a in last_track.artists),
             caption=(
                 f"<a href='https://music.yandex.com/album/{album.id}/track/{last_track.id}'>"
-                f"{', '.join(a.name for a in last_track.artists)} — {last_track.title}</a>"
+                f"{', '.join(a.name or '' for a in last_track.artists)} — {last_track.title}</a>"
             ),
             lyrics_text=lyrics_text,
         )

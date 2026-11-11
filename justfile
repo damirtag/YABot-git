@@ -25,11 +25,11 @@ lint:
 # auto-fix lint issues + format
 fmt:
     uv run ruff check --fix src tests
-    uv run ruff format src tests
+    uv run black src tests
 
 # verify formatting without writing (CI parity)
 fmt-check:
-    uv run ruff format --check src tests
+    uv run black --check src tests
 
 # type check (advisory, mirrors CI)
 typecheck:

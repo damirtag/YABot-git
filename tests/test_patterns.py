@@ -53,3 +53,15 @@ def test_posts_matches_p_links():
 
 def test_posts_excludes_reels():
     assert not Patterns.INST_POSTS.value.match("https://www.instagram.com/reel/ABC123/")
+
+
+async def test_regex_filter_injects_link():
+    from types import SimpleNamespace
+
+    from utils import RegexFilter
+
+    f = RegexFilter(Patterns.TIKTOK.value)
+    url = "https://vm.tiktok.com/ZMabc123/"
+    assert await f(SimpleNamespace(text=f"look {url}")) == {"link": url}
+    assert await f(SimpleNamespace(text="no link here")) is False
+    assert await f(SimpleNamespace(text=None)) is False

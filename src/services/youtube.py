@@ -132,7 +132,7 @@ class YouTubeSDK:
         elif d["status"] == "finished":
             self.logger.info(f"Download complete: {d['filename']}")
 
-    async def _run_yt_dlp(self, url: str, options: dict[str, Any]) -> dict[str, Any]:
+    async def _run_yt_dlp(self, url: str, options: dict[str, Any]) -> Any:
         """Run yt-dlp in a separate thread with optimizations."""
         loop = asyncio.get_event_loop()
 
@@ -172,7 +172,9 @@ class YouTubeSDK:
             self.logger.error(f"Error fetching video info: {str(e)}")
             raise
 
-    async def download(self, url: str, audio_only: bool = False, duration_limit: int = 360) -> str:
+    async def download(
+        self, url: str, audio_only: bool = False, duration_limit: int = 360
+    ) -> str | None:
         """
         Download a YouTube video/audio optimized for Telegram.
 
@@ -243,9 +245,11 @@ class YouTubeSDK:
                 logging.info("[youtube] its a playlist")
                 downloaded_file = os.path.join(
                     self.output_dir,
-                    f"{info['entries'][0]['title']}.mp4"
-                    if not audio_only
-                    else f"{info['entries'][0]['title']}.mp3",
+                    (
+                        f"{info['entries'][0]['title']}.mp4"
+                        if not audio_only
+                        else f"{info['entries'][0]['title']}.mp3"
+                    ),
                 )
             else:  # It's a single video
                 if audio_only:

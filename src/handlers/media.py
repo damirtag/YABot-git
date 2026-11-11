@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import os
-import re
 import shutil
 import traceback
 from datetime import datetime
@@ -23,7 +22,7 @@ from database.repo import DB_actions
 from services.inst import download_instagram_post, download_instagram_reel
 from services.soundcloud import SoundCloudTool
 from services.tiktok import TikTok
-from services.yandexmusic import TrackData, YandexMusicSDK
+from services.yandexmusic import YandexMusicSDK
 from services.youtube import YouTubeSDK
 from utils import YANDEX_MUSIC_TRACK_CAPTION, ConsoleColors, RegexFilter, Tools
 from utils.helpers import cover_thumbnail
@@ -72,16 +71,13 @@ def _cleanup_tiktok_files(tt, post_data, sound):
 
 
 @router.message(RegexFilter(Patterns.TIKTOK.value), flags={"log": "TIKTOK_LINKS"})
-async def tiktok_downloader(message: types.Message, bot: Bot):
+async def tiktok_downloader(message: types.Message, bot: Bot, link: str):
     if message.chat.id in IGNORE_CHAT_IDS:
         return False
     else:
         await bot.send_chat_action(message.chat.id, "record_video")
         event_chat = message.chat
         chat_id = message.chat.id
-        match = re.search(Patterns.TIKTOK.value, message.text)
-        if match:
-            link: str = match.group(0)
 
         try:
             logger.info(
@@ -131,9 +127,9 @@ async def tiktok_downloader(message: types.Message, bot: Bot):
                                     chat_id=chat_id,
                                     audio=types.FSInputFile(sound),
                                     reply_to_message_id=message.message_id,
-                                    reply_markup=SAVE_BUTTON
-                                    if message.chat.type == "private"
-                                    else None,
+                                    reply_markup=(
+                                        SAVE_BUTTON if message.chat.type == "private" else None
+                                    ),
                                     title=str(sound.split(".")[0]),
                                 )
                             except Exception as e:
@@ -153,9 +149,9 @@ async def tiktok_downloader(message: types.Message, bot: Bot):
                                 duration=post_data.duration,
                                 width=post_data.width,
                                 height=post_data.height,
-                                reply_markup=SAVE_BUTTON
-                                if message.chat.type == "private"
-                                else None,
+                                reply_markup=(
+                                    SAVE_BUTTON if message.chat.type == "private" else None
+                                ),
                             )
                         except exceptions.TelegramNetworkError:
                             await message.reply("Sorry, the file is too large.")
@@ -171,9 +167,9 @@ async def tiktok_downloader(message: types.Message, bot: Bot):
                                         chat_id=chat_id,
                                         audio=types.FSInputFile(sound),
                                         reply_to_message_id=message.message_id,
-                                        reply_markup=SAVE_BUTTON
-                                        if message.chat.type == "private"
-                                        else None,
+                                        reply_markup=(
+                                            SAVE_BUTTON if message.chat.type == "private" else None
+                                        ),
                                         title=str(sound.split(".")[0]),
                                     )
                                 except Exception as e:
@@ -285,7 +281,7 @@ async def inst_reels_handler(message: types.Message, bot: Bot):
 
 
 @router.message(RegexFilter(Patterns.INST_POSTS.value), flags={"log": "INST_POST"})
-async def inst_photos_handler(message: types.Message, bot: Bot):
+async def inst_photos_handler(message: types.Message, bot: Bot, link: str):
     event_chat = message.chat
     if event_chat.id in IGNORE_CHAT_IDS:
         return False
@@ -301,14 +297,12 @@ async def inst_photos_handler(message: types.Message, bot: Bot):
 
     await bot.send_chat_action(message.chat.id, "upload_photo")
 
-    match = re.search(Patterns.INST_POSTS.value, message.text)
-    post_url = match.group(0) if match else message.text.strip()
-    shortcode = post_url.rstrip("/").split("/")[-1].split("?")[0]
+    shortcode = link.rstrip("/").split("/")[-1].split("?")[0]
 
     download_dir = os.path.join("./temp_downloads", shortcode)
 
     try:
-        files = await download_instagram_post(post_url, download_dir)
+        files = await download_instagram_post(link, download_dir)
 
         if not files:
             await message.reply(
@@ -358,7 +352,7 @@ async def inst_photos_handler(message: types.Message, bot: Bot):
 
 
 @router.message(RegexFilter(Patterns.TWITCH_VK.value), flags={"log": "TWITCH_VK_LINKS"})
-async def twitch_vk_handler(message: types.Message, bot: Bot):
+async def twitch_vk_handler(message: types.Message, bot: Bot, link: str):
     event_chat = message.chat
     message_id = message.message_id
     try:
@@ -369,7 +363,6 @@ async def twitch_vk_handler(message: types.Message, bot: Bot):
         )
     except AttributeError:
         pass
-    link = message.text
 
     await bot.send_chat_action(message.chat.id, "record_video")
 
@@ -399,7 +392,7 @@ async def twitch_vk_handler(message: types.Message, bot: Bot):
                 title = ytdl.prepare_filename(result)
                 ytdl.download([link])
         except Exception:
-            await bot.send_message(
+            return await bot.send_message(
                 text=BASE_ERROR,
                 chat_id=message.chat.id,
                 reply_to_message_id=message_id,
@@ -408,12 +401,11 @@ async def twitch_vk_handler(message: types.Message, bot: Bot):
 
         video_title = result.get("title", None)
         uploader = result.get("uploader", None)
-        video = open(f"{title}", "rb")
         caption = f"📹: <a href='{link}'>{video_title}</a>\n\n👤: <a href='{link}'>{uploader}</a>"
         try:
             sended_to_user = await bot.send_video(
                 chat_id=message.chat.id,
-                video=types.FSInputFile(video),
+                video=types.FSInputFile(title),
                 caption=caption,
                 reply_to_message_id=message.message_id,
                 supports_streaming=True,
@@ -423,7 +415,7 @@ async def twitch_vk_handler(message: types.Message, bot: Bot):
                 CACHE_CHAT, message.chat.id, sended_to_user.message_id
             )
             try:
-                if db.get_cached_media(sended_media.message_id, link):
+                if db.save_to_cache(sended_media.message_id, link):
                     logger.info(
                         f"[Media:video] | {ConsoleColors.OKGREEN}{link} cached{ConsoleColors.ENDC}"
                     )
@@ -447,14 +439,10 @@ async def twitch_vk_handler(message: types.Message, bot: Bot):
 
 
 @router.message(RegexFilter(Patterns.YOUTUBE.value), flags={"log": "YOUTUBE_VIDEO"})
-async def handle_youtube_video(m: types.Message, bot: Bot):
+async def handle_youtube_video(m: types.Message, bot: Bot, link: str):
     if m.chat.id in IGNORE_CHAT_IDS:
         return False
     await bot.send_chat_action(m.chat.id, "record_video")
-
-    match = re.search(Patterns.YOUTUBE.value, m.text)
-    if match:
-        link: str = match.group(0)
 
     try:
         logger.info(
@@ -519,13 +507,9 @@ async def handle_youtube_video(m: types.Message, bot: Bot):
 
 
 @router.message(RegexFilter(Patterns.YANDEX_MUSIC.value), flags={"log": "YM_TRACK_LINKS"})
-async def yandex_music_link_handler(m: types.Message):
-    match = re.search(Patterns.YANDEX_MUSIC.value, m.text)
-    if match:
-        track_link = match.group(0)
-
+async def yandex_music_link_handler(m: types.Message, link: str):
     async with YandexMusicSDK() as ym:
-        track: TrackData = await ym.get_track(track_link)
+        track = await ym.get_track(link)
         if not track:
             return await m.answer("🚫 Track not found =000")
 
@@ -552,87 +536,81 @@ async def yandex_music_link_handler(m: types.Message):
 
 
 @router.message(RegexFilter(Patterns.SOUNDCLOUD.value), flags={"log": "SC_TRACK_LINKS"})
-async def soundload(message: types.Message, bot: Bot):
+async def soundload(message: types.Message, bot: Bot, link: str):
     chat_id = message.chat.id
     message_id = message.message_id
     if chat_id in IGNORE_CHAT_IDS:
         return False
     else:
         await bot.send_chat_action(chat_id, "record_voice")
-        match = re.search(Patterns.SOUNDCLOUD.value, message.text)
-        if match:
-            link = match.group(0)
-            if link and "https://on." in link:
-                link = await tools.convert_share_urls(link)
-            current_date = datetime.now(pytz.timezone("Asia/Almaty"))
-            if current_date.tzinfo is None or current_date.tzinfo.utcoffset(current_date) is None:
-                logger.info("Unaware")
-            else:
-                logger.info("======")
-            username = message.from_user.full_name
-            logger.info(f"[{current_date}] {username} : {link}")
+        if link and "https://on." in link:
+            link = await tools.convert_share_urls(link)
+        current_date = datetime.now(pytz.timezone("Asia/Almaty"))
+        if current_date.tzinfo is None or current_date.tzinfo.utcoffset(current_date) is None:
+            logger.info("Unaware")
+        else:
+            logger.info("======")
+        username = message.from_user.full_name
+        logger.info(f"[{current_date}] {username} : {link}")
 
-            # Check cache first
-            result = db.get_cached_media(link)
-            if result:
-                from_chat_id, from_message_id = result
-                return await bot.copy_message(
-                    chat_id,
-                    from_chat_id,
-                    from_message_id,
+        # Check cache first
+        result = db.get_cached_media(link)
+        if result:
+            from_chat_id, from_message_id = result
+            return await bot.copy_message(
+                chat_id,
+                from_chat_id,
+                from_message_id,
+                reply_to_message_id=message_id,
+                reply_markup=SAVE_BUTTON if message.chat.type == "private" else None,
+            )
+        else:
+            logger.info("downloading mp3 format | SOUNDCLOUD")
+            try:
+                track = await sc.get_track(str(link))
+                saved_track = await sc.save_track(track, "audio")
+            except Exception as e:
+                logger.error(f"[soundcloud]: failed to get/save track {e}")
+                return await bot.send_message(
+                    text=BASE_ERROR,
+                    chat_id=chat_id,
                     reply_to_message_id=message_id,
+                    reply_markup=CLOSE_BUTTON,
+                )
+
+            caption = f"{track.caption}\n<i>via @yerzhanakh_bot</i>"
+
+            try:
+                await bot.send_chat_action(chat_id, "upload_voice")
+                sended_to_user = await message.reply_audio(
+                    audio=types.FSInputFile(saved_track),
+                    caption=caption,
+                    duration=int(track.duration),
+                    performer=track.artists,
+                    title=track.title,
+                    thumbnail=cover_thumbnail(track.cover),
                     reply_markup=SAVE_BUTTON if message.chat.type == "private" else None,
                 )
-            else:
-                logger.info("downloading mp3 format | SOUNDCLOUD")
+                cached_audio = await bot.copy_message(
+                    CACHE_CHAT, chat_id, sended_to_user.message_id
+                )
                 try:
-                    track = await sc.get_track(str(link))
-                    saved_track = await sc.save_track(track, "audio")
+                    db.save_to_cache(cached_audio.message_id, link)
+                    logger.info(
+                        f"[Soundcloud:track] | {ConsoleColors.OKGREEN}{link} cached{ConsoleColors.ENDC}"
+                    )
                 except Exception as e:
-                    logger.error(f"[soundcloud]: failed to get/save track {e}")
-                    chat_id = chat_id
-                    await bot.send_message(
-                        text=BASE_ERROR,
-                        chat_id=chat_id,
-                        reply_to_message_id=message_id,
-                        reply_markup=CLOSE_BUTTON,
-                    )
-
-                caption = f"{track.caption}\n<i>via @yerzhanakh_bot</i>"
-
-                try:
-                    await bot.send_chat_action(chat_id, "upload_voice")
-                    sended_to_user = await message.reply_audio(
-                        audio=types.FSInputFile(saved_track),
-                        caption=caption,
-                        duration=int(track.duration),
-                        performer=track.artists,
-                        title=track.title,
-                        thumbnail=cover_thumbnail(track.cover),
-                        reply_markup=SAVE_BUTTON if message.chat.type == "private" else None,
-                    )
-                    cached_audio = await bot.copy_message(
-                        CACHE_CHAT, chat_id, sended_to_user.message_id
-                    )
-                    try:
-                        db.save_to_cache(cached_audio.message_id, link)
-                        logger.info(
-                            f"[Soundcloud:track] | {ConsoleColors.OKGREEN}{link} cached{ConsoleColors.ENDC}"
-                        )
-                    except Exception as e:
-                        logger.info(f"[Soundcloud:track] | Failed to cache {link} | Error: {e}")
-                except Exception as e:
-                    logger.error(f"Failed to send soundcloud track: {e}")
-                    return await bot.send_message(
-                        text=BASE_ERROR,
-                        chat_id=chat_id,
-                        reply_to_message_id=message_id,
-                        reply_markup=CLOSE_BUTTON,
-                    )
-                finally:
-                    # deleting file after
-                    if saved_track:
-                        os.remove(saved_track)
-                        logger.info("%s has been removed successfuly", saved_track)
-        else:
-            logger.info(f"[soundcloud]: link not found, message: {message.text}")
+                    logger.info(f"[Soundcloud:track] | Failed to cache {link} | Error: {e}")
+            except Exception as e:
+                logger.error(f"Failed to send soundcloud track: {e}")
+                return await bot.send_message(
+                    text=BASE_ERROR,
+                    chat_id=chat_id,
+                    reply_to_message_id=message_id,
+                    reply_markup=CLOSE_BUTTON,
+                )
+            finally:
+                # deleting file after
+                if saved_track:
+                    os.remove(saved_track)
+                    logger.info("%s has been removed successfuly", saved_track)

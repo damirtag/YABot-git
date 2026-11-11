@@ -66,6 +66,8 @@ async def save(call: types.CallbackQuery):
     elif call.message.document:
         file_id = call.message.document.file_id
         file_type = call.message.document.mime_type
+    else:
+        return await call.answer("Unsupported file", show_alert=True)
 
     try:
         existing_file = db.execute_query(
@@ -270,9 +272,11 @@ async def download_yandex_track(callback_query: types.CallbackQuery, bot: Bot):
                 from_chat_id=from_chat_id,
                 message_id=from_message_id,
                 reply_markup=SAVE_BUTTON if callback_query.message.chat.type == "private" else None,
-                reply_to_message_id=callback_query.message.reply_to_message.message_id
-                if callback_query.message.reply_to_message
-                else None,
+                reply_to_message_id=(
+                    callback_query.message.reply_to_message.message_id
+                    if callback_query.message.reply_to_message
+                    else None
+                ),
             )
             return await msg.delete()
 
@@ -307,9 +311,11 @@ async def download_yandex_track(callback_query: types.CallbackQuery, bot: Bot):
                 duration=int(track.duration),
                 thumbnail=cover_thumbnail(track.cover),
                 reply_markup=SAVE_BUTTON if callback_query.message.chat.type == "private" else None,
-                reply_to_message_id=callback_query.message.reply_to_message.message_id
-                if callback_query.message.reply_to_message
-                else None,
+                reply_to_message_id=(
+                    callback_query.message.reply_to_message.message_id
+                    if callback_query.message.reply_to_message
+                    else None
+                ),
             )
             cached_track = await bot.copy_message(CACHE_CHAT, msg.chat.id, user_track.message_id)
 
@@ -355,9 +361,11 @@ async def download_soundcl_track(callback_query: types.CallbackQuery, bot: Bot):
                 from_chat_id=from_chat_id,
                 message_id=from_message_id,
                 reply_markup=SAVE_BUTTON if callback_query.message.chat.type == "private" else None,
-                reply_to_message_id=callback_query.message.reply_to_message.message_id
-                if callback_query.message.reply_to_message
-                else None,
+                reply_to_message_id=(
+                    callback_query.message.reply_to_message.message_id
+                    if callback_query.message.reply_to_message
+                    else None
+                ),
             )
             return await msg.delete()
 
@@ -385,9 +393,11 @@ async def download_soundcl_track(callback_query: types.CallbackQuery, bot: Bot):
             duration=int(track.duration),
             thumbnail=cover_thumbnail(track.cover),
             reply_markup=SAVE_BUTTON if callback_query.message.chat.type == "private" else None,
-            reply_to_message_id=callback_query.message.reply_to_message.message_id
-            if callback_query.message.reply_to_message
-            else None,
+            reply_to_message_id=(
+                callback_query.message.reply_to_message.message_id
+                if callback_query.message.reply_to_message
+                else None
+            ),
         )
         cached_track = await bot.copy_message(CACHE_CHAT, msg.chat.id, user_track.message_id)
 

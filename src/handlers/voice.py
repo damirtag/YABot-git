@@ -18,6 +18,7 @@ db = DB_actions()
 async def get_audio_messages(message: types.Message, bot: Bot):
     file_name = None
     converter = None
+    msg = None
 
     try:
         start_time = time.time()
@@ -52,7 +53,8 @@ async def get_audio_messages(message: types.Message, bot: Bot):
 
     except Exception as e:
         logger.error(f"[audio_recognizer] Error: {e}")
-        await msg.delete()
+        if msg:
+            await msg.delete()
     finally:
         # Clean up resources
         if file_name and os.path.exists(file_name):

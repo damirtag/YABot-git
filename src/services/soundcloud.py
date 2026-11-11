@@ -124,7 +124,7 @@ class SoundCloudTool:
 
         return tracks
 
-    async def get_track(self, track_url: str) -> Track:
+    async def get_track(self, track_url: str) -> Track | None:
         """
         Get a single track by URL.
         """
